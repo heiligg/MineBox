@@ -1,1 +1,0 @@
-"""MineBox service layer."""
