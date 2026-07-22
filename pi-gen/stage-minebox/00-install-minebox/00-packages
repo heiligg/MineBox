@@ -1,0 +1,12 @@
+python3
+python3-psutil
+default-jre-headless
+acl
+sudo
+rsync
+curl
+ca-certificates
+network-manager
+openssh-server
+zip
+unzip

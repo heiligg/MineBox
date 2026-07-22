@@ -1,0 +1,38 @@
+#!/bin/bash
+set -euo pipefail
+
+install -d -o minebox -g minebox -m 2770 /opt/minecraft/backups
+install -d -o minecraft -g minebox -m 2770 /opt/minecraft/server
+install -d -o minebox -g minebox -m 0750 /home/minebox/.config/minebox
+
+if [ ! -f /opt/minecraft/server/eula.txt ]; then
+  cat >/opt/minecraft/server/eula.txt <<'EULA'
+# MineBox will not start a Minecraft server until you accept Mojang's EULA.
+eula=false
+EULA
+  chown minecraft:minebox /opt/minecraft/server/eula.txt
+  chmod 0660 /opt/minecraft/server/eula.txt
+fi
+
+if [ ! -f /opt/minecraft/server/server.properties ]; then
+  cat >/opt/minecraft/server/server.properties <<'PROPS'
+server-port=25565
+enable-rcon=true
+rcon.port=25575
+rcon.password=MineBoxLocalRcon
+motd=MineBox Minecraft Server
+max-players=20
+online-mode=true
+white-list=false
+view-distance=10
+simulation-distance=10
+PROPS
+  chown minecraft:minebox /opt/minecraft/server/server.properties
+  chmod 0660 /opt/minecraft/server/server.properties
+fi
+
+setfacl -R -m u:minebox:rwX,u:minecraft:rwX,g:minebox:rwX,m::rwX /opt/minecraft
+setfacl -R -d -m u:minebox:rwX,u:minecraft:rwX,g:minebox:rwX,m::rwX /opt/minecraft
+
+touch /var/lib/minebox/firstboot-complete
+chown minebox:minebox /var/lib/minebox/firstboot-complete
