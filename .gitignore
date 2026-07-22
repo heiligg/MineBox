@@ -1,0 +1,7 @@
+build/
+*.img
+*.img.xz
+*.log
+*.tmp
+__pycache__/
+.vscode/
