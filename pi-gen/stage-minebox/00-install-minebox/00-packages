@@ -10,3 +10,5 @@ network-manager
 openssh-server
 zip
 unzip
+python3-fastapi
+uvicorn
