@@ -37,42 +37,46 @@ else
   git -C "$PI_GEN_DIR" reset --hard origin/arm64
 fi
 
-# GitHub's setup-qemu action already installs a working host-side binfmt
-# handler. Reconfiguring qemu-user-binfmt inside pi-gen's privileged container
-# can replace it with an unusable interpreter path. Replace only the exact
-# command token with `true`; avoid inserting quoted text into pi-gen's nested
-# bash -c string. Verify the expected upstream line before and after editing.
+# GitHub's setup-qemu action already proves ARM64 execution works by running an
+# ARM64 Docker container earlier in the workflow. pi-gen's wrapper performs an
+# additional host-shell binfmt probe that is incompatible with the runner's
+# container-managed registration, even though Docker emulation is functional.
+# In CI only, skip that redundant host probe and preserve the existing binfmt
+# registration instead of reconfiguring it inside the privileged container.
 if [ "${GITHUB_ACTIONS:-false}" = "true" ]; then
   docker_script="$PI_GEN_DIR/build-docker.sh"
-  expected='    dpkg-reconfigure qemu-user-binfmt &&'
-  replacement='    true &&'
 
-  match_count="$(grep -Fxc "$expected" "$docker_script" || true)"
-  if [ "$match_count" -ne 1 ]; then
-    echo "ERROR: Expected exactly one qemu-user-binfmt line in pi-gen build-docker.sh; found $match_count."
-    exit 1
-  fi
-
-  python3 - "$docker_script" "$expected" "$replacement" <<'PY'
+  python3 - "$docker_script" <<'PY'
 from pathlib import Path
 import sys
 
 path = Path(sys.argv[1])
-expected = sys.argv[2]
-replacement = sys.argv[3]
 text = path.read_text()
-old = expected + "\n"
-new = replacement + "\n"
-if text.count(old) != 1:
-    raise SystemExit("expected qemu-user-binfmt command was not unique")
-path.write_text(text.replace(old, new, 1))
+replacements = {
+    "binfmt_misc_required=1\n": "binfmt_misc_required=0\n",
+    "    dpkg-reconfigure qemu-user-binfmt &&\n": "    true &&\n",
+}
+
+for old, new in replacements.items():
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(
+            f"expected exactly one occurrence of {old.strip()!r}; found {count}"
+        )
+    text = text.replace(old, new, 1)
+
+path.write_text(text)
 PY
 
-  grep -Fqx "$replacement" "$docker_script" || {
-    echo "ERROR: Failed to apply the GitHub Actions QEMU compatibility patch."
+  grep -Fqx 'binfmt_misc_required=0' "$docker_script" || {
+    echo "ERROR: Failed to disable pi-gen's redundant host ARM64 probe."
     exit 1
   }
-  echo "Using GitHub Actions ARM64 binfmt registration."
+  grep -Fqx '    true &&' "$docker_script" || {
+    echo "ERROR: Failed to preserve GitHub Actions QEMU registration."
+    exit 1
+  }
+  echo "Using verified GitHub Actions Docker ARM64 emulation."
 fi
 
 # pi-gen itself has a FILE named 'config'. Keep MineBox's configuration at
