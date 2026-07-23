@@ -11,6 +11,7 @@ from api.routes.health import router as health_router
 from api.routes.minecraft import router as minecraft_router
 from api.routes.system import router as system_router
 from api.routes.setup import router as setup_router
+from api.routes.servers import router as servers_router
 
 from starlette.middleware.sessions import SessionMiddleware
 from api.routes.auth import router as auth_router
@@ -44,9 +45,6 @@ app.add_middleware(
     https_only=False,
 )
 
-
-
-
 app.mount(
     "/static",
     StaticFiles(directory=STATIC_DIR),
@@ -63,6 +61,7 @@ app.include_router(system_router)
 app.include_router(minecraft_router)
 app.include_router(console_router)
 app.include_router(setup_router)
+app.include_router(servers_router)
 app.include_router(console_command.router)
 app.include_router(backups.router)
 app.include_router(network.router)
