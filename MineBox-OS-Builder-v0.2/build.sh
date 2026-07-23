@@ -24,6 +24,8 @@ done
 
 "${ROOT_DIR}/check-project.sh"
 mkdir -p "$WORK_DIR"
+rm -rf "$ROOT_DIR/output"
+mkdir -p "$ROOT_DIR/output"
 
 if [ ! -d "$PI_GEN_DIR/.git" ]; then
   echo "Downloading the official 64-bit Raspberry Pi OS image builder..."
@@ -54,6 +56,10 @@ install -m 0644 "$ROOT_DIR/config/minebox-pi5.conf" "$PI_GEN_CONFIG"
 rm -rf "$PI_GEN_DIR/stage-minebox"
 cp -a "$ROOT_DIR/pi-gen/stage-minebox" "$PI_GEN_DIR/stage-minebox"
 
+# pi-gen only exports a disk image when the final stage contains this marker.
+# Create it explicitly after copying so CI cannot silently finish with no image.
+touch "$PI_GEN_DIR/stage-minebox/EXPORT_IMAGE"
+
 # Refresh the embedded application each build so local UI changes enter the image.
 rm -rf "$PI_GEN_DIR/stage-minebox/00-install-minebox/files/minebox"
 mkdir -p "$PI_GEN_DIR/stage-minebox/00-install-minebox/files/minebox"
@@ -80,11 +86,26 @@ else
   sudo ./build.sh -c "$PI_GEN_CONFIG_NAME"
 fi
 
-mkdir -p "$ROOT_DIR/output"
-find deploy -maxdepth 1 -type f \
-  \( -name '*.img' -o -name '*.img.xz' -o -name '*.img.gz' -o -name '*.zip' -o -name '*.bmap' \) \
-  -exec cp -v {} "$ROOT_DIR/output/" \;
+mapfile -d '' image_files < <(
+  find deploy -type f \
+    \( -name '*.img' -o -name '*.img.xz' -o -name '*.img.gz' -o -name '*.zip' -o -name '*.bmap' \) \
+    -print0
+)
+
+if [ "${#image_files[@]}" -eq 0 ]; then
+  echo "ERROR: pi-gen completed without producing a deployable image."
+  echo "Contents of pi-gen/deploy:"
+  find deploy -maxdepth 3 -printf '%y %p %s bytes\n' 2>/dev/null || true
+  echo "Recent pi-gen build log output:"
+  find deploy -type f -name '*.log' -exec tail -n 100 {} \; 2>/dev/null || true
+  exit 1
+fi
+
+for image_file in "${image_files[@]}"; do
+  cp -v "$image_file" "$ROOT_DIR/output/"
+done
 
 echo
 echo "Build complete. Output files are in:"
 echo "  $ROOT_DIR/output"
+find "$ROOT_DIR/output" -maxdepth 1 -type f -printf '%f %s bytes\n'
