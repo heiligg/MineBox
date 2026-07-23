@@ -13,6 +13,8 @@ SERVERS_DIR = MINECRAFT_ROOT / "servers"
 METADATA_DIR = MINECRAFT_ROOT / "metadata"
 REGISTRY_FILE = METADATA_DIR / "servers.json"
 ACTIVE_SERVER_FILE = METADATA_DIR / "active_server"
+DEFAULT_SERVER_PORT = 25565
+DEFAULT_RCON_PORT = 25575
 
 
 class ServerManagerError(RuntimeError):
@@ -81,8 +83,8 @@ def list_servers() -> list[ServerInstance]:
                 directory=str(raw.get("directory", server_directory(server_id))),
                 version=str(raw.get("version", "unknown")),
                 memory_gb=int(raw.get("memory_gb", 4)),
-                port=int(raw.get("port", 25565)),
-                rcon_port=int(raw.get("rcon_port", 25575)),
+                port=int(raw.get("port", DEFAULT_SERVER_PORT)),
+                rcon_port=int(raw.get("rcon_port", DEFAULT_RCON_PORT)),
             )
         )
     return sorted(server_instances, key=lambda item: item.name.lower())
@@ -116,13 +118,6 @@ def set_active_server(server_id: str) -> ServerInstance:
     return server
 
 
-def _next_available_port(used_ports: set[int], start: int) -> int:
-    for port in range(start, 65536):
-        if port not in used_ports:
-            return port
-    raise ServerManagerError("No available TCP port could be assigned.")
-
-
 def reserve_server(
     name: str,
     version: str,
@@ -134,20 +129,16 @@ def reserve_server(
     if clean_id in registry["servers"] or server_directory(clean_id).exists():
         raise ServerManagerError(f"A server named '{clean_id}' already exists.")
 
-    existing = list_servers()
-    used_ports = {item.port for item in existing} | {item.rcon_port for item in existing}
-    port = _next_available_port(used_ports, 25565)
-    used_ports.add(port)
-    rcon_port = _next_available_port(used_ports, 25575)
-
+    # MineBox intentionally runs only one Minecraft server at a time, so every
+    # server can share Minecraft's default gameplay and RCON ports.
     instance = ServerInstance(
         server_id=clean_id,
         name=name.strip(),
         directory=str(server_directory(clean_id)),
         version=version,
         memory_gb=memory_gb,
-        port=port,
-        rcon_port=rcon_port,
+        port=DEFAULT_SERVER_PORT,
+        rcon_port=DEFAULT_RCON_PORT,
     )
     registry["servers"][clean_id] = asdict(instance)
     _save_registry(registry)
@@ -156,6 +147,22 @@ def reserve_server(
         set_active_server(clean_id)
 
     return instance
+
+
+def normalize_shared_ports() -> int:
+    """Set every registered server to MineBox's shared default ports."""
+    registry = _load_registry()
+    changed = 0
+    for raw in registry["servers"].values():
+        if raw.get("port") != DEFAULT_SERVER_PORT:
+            raw["port"] = DEFAULT_SERVER_PORT
+            changed += 1
+        if raw.get("rcon_port") != DEFAULT_RCON_PORT:
+            raw["rcon_port"] = DEFAULT_RCON_PORT
+            changed += 1
+    if changed:
+        _save_registry(registry)
+    return changed
 
 
 def remove_server_record(server_id: str) -> None:
