@@ -63,3 +63,18 @@ def select_active_server(request: SelectServerRequest):
         }
     except servers.ServerManagerError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
+
+
+@router.delete("/{server_id}")
+def delete_server_instance(server_id: str):
+    try:
+        instance = servers.delete_server(server_id)
+        active = servers.active_server()
+        return {
+            "success": True,
+            "message": f"'{instance.name}' was deleted.",
+            "deleted_server_id": instance.server_id,
+            "active_server_id": active.server_id if active else None,
+        }
+    except servers.ServerManagerError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
