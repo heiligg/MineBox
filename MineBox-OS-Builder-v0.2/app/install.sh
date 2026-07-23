@@ -33,27 +33,21 @@ chown -R "$MINEBOX_USER:$SHARED_GROUP" "$TARGET_DIR"
 chmod -R u=rwX,g=rX,o=rX "$TARGET_DIR"
 chmod +x "$TARGET_DIR/install.sh" "$TARGET_DIR/scripts/maintenance_runner.py"
 
-# MineBox and Minecraft share access to server data. The setgid bit keeps all
-# new folders in the shared group, and group write access prevents runtime
-# password prompts for backups, settings, logs, worlds, and server.properties.
 chown -R "$MINECRAFT_USER:$SHARED_GROUP" /opt/minecraft
 find /opt/minecraft -type d -exec chmod 2775 {} +
 find /opt/minecraft -type f -exec chmod 0664 {} +
 
-# Default ACLs keep future files writable even when programs choose a strict umask.
 if command -v setfacl >/dev/null 2>&1; then
   setfacl -R -m "u:${MINEBOX_USER}:rwX,u:${MINECRAFT_USER}:rwX,g:${SHARED_GROUP}:rwX" /opt/minecraft
   setfacl -R -d -m "u:${MINEBOX_USER}:rwX,u:${MINECRAFT_USER}:rwX,g:${SHARED_GROUP}:rwX,m::rwX" /opt/minecraft
 fi
 
-# Make files created by minecraft.service group-writable in the future.
 mkdir -p /etc/systemd/system/minecraft.service.d
 cat > /etc/systemd/system/minecraft.service.d/minebox-permissions.conf <<'OVERRIDE'
 [Service]
 UMask=0002
 OVERRIDE
 
-# Runtime actions are passwordless, but only for these exact service/power commands.
 cat > "$SUDOERS_FILE" <<'SUDOERS'
 minebox ALL=(root) NOPASSWD: /usr/bin/systemctl start minecraft.service, /usr/bin/systemctl stop minecraft.service, /usr/bin/systemctl restart minecraft.service, /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot
 SUDOERS
@@ -63,21 +57,22 @@ visudo -cf "$SUDOERS_FILE"
 install -m 0644 "$TARGET_DIR/services/minebox.service" /etc/systemd/system/minebox.service
 install -m 0644 "$TARGET_DIR/services/minebox-maintenance.service" /etc/systemd/system/minebox-maintenance.service
 install -m 0644 "$TARGET_DIR/services/minebox-maintenance.timer" /etc/systemd/system/minebox-maintenance.timer
-install -m 0644 "$TARGET_DIR/services/minebox-network.service" /etc/systemd/system/minebox-network.service
+
+# The image now uses hostapd + dnsmasq. Never enable the legacy NetworkManager
+# hotspot guard because it would compete for wlan0 and disconnect clients.
+systemctl disable --now minebox-network.service >/dev/null 2>&1 || true
+rm -f /etc/systemd/system/minebox-network.service
 
 systemctl daemon-reload
 systemctl enable minebox.service >/dev/null 2>&1 || true
 systemctl enable --now minebox-maintenance.timer
-systemctl enable --now minebox-network.service
 
-# Refresh current server files after applying the service umask override.
 if systemctl is-active --quiet minecraft.service; then
   systemctl restart minecraft.service
 fi
 
 echo
-echo "MineBox 1.3.1 installed successfully."
-echo "Runtime features will not ask for a sudo password."
-echo "The automatic setup hotspot service is enabled."
+echo "MineBox installed successfully."
+echo "Dedicated hostapd hotspot configuration is preserved."
 echo "Log out and back in once so the minebox group membership refreshes."
 echo "Then launch with: cd /opt/minebox && python3 main.py"
