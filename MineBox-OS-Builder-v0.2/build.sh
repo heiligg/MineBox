@@ -35,6 +35,18 @@ else
   git -C "$PI_GEN_DIR" reset --hard origin/arm64
 fi
 
+# GitHub's setup-qemu action already installs a persistent host-side binfmt
+# handler. pi-gen's Docker wrapper normally runs dpkg-reconfigure inside a
+# privileged container, which can overwrite that working host registration
+# with an interpreter path that only exists inside the container. Skip only
+# that reconfiguration in GitHub Actions; local pi-gen behavior is unchanged.
+if [ "${GITHUB_ACTIONS:-false}" = "true" ]; then
+  echo "Preserving GitHub Actions ARM64 binfmt registration..."
+  sed -i \
+    's/dpkg-reconfigure qemu-user-binfmt &&/echo "Using existing GitHub Actions binfmt registration" \&\&/' \
+    "$PI_GEN_DIR/build-docker.sh"
+fi
+
 # pi-gen itself has a FILE named 'config'. Keep MineBox's configuration at
 # the repository root under a different filename. Do not create pi-gen/config/.
 install -m 0644 "$ROOT_DIR/config/minebox-pi5.conf" "$PI_GEN_CONFIG"
