@@ -13,10 +13,6 @@ VERSION_MANIFEST_URL = (
     "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json"
 )
 
-SERVER_DIR = Path("/opt/minecraft")
-SERVER_JAR = SERVER_DIR / "server.jar"
-TEMP_SERVER_JAR = SERVER_DIR / "server.jar.download"
-
 
 class DownloadError(RuntimeError):
     pass
@@ -73,16 +69,8 @@ def _find_version(version_id: str) -> dict[str, Any]:
     raise DownloadError(f"Minecraft version '{version_id}' was not found.")
 
 
-def _download_file(
-    url: str,
-    destination: Path,
-    expected_sha1: str,
-) -> int:
-    request = urllib.request.Request(
-        url,
-        headers={"User-Agent": "MineBox/0.2"},
-    )
-
+def _download_file(url: str, destination: Path, expected_sha1: str) -> int:
+    request = urllib.request.Request(url, headers={"User-Agent": "MineBox/0.2"})
     digest = hashlib.sha1()
     total_bytes = 0
 
@@ -91,48 +79,44 @@ def _download_file(
             with destination.open("wb") as output:
                 while True:
                     chunk = response.read(1024 * 1024)
-
                     if not chunk:
                         break
-
                     output.write(chunk)
                     digest.update(chunk)
                     total_bytes += len(chunk)
-
     except (urllib.error.URLError, TimeoutError, OSError) as error:
         destination.unlink(missing_ok=True)
         raise DownloadError(f"Server download failed: {error}") from error
 
     actual_sha1 = digest.hexdigest()
-
     if actual_sha1.lower() != expected_sha1.lower():
         destination.unlink(missing_ok=True)
-        raise DownloadError(
-            "The downloaded server file failed its integrity check."
-        )
+        raise DownloadError("The downloaded server file failed its integrity check.")
 
     return total_bytes
 
 
-def download_server(version_id: str, overwrite: bool = False) -> dict[str, Any]:
-    SERVER_DIR.mkdir(parents=True, exist_ok=True)
+def download_server(
+    version_id: str,
+    server_dir: Path,
+    overwrite: bool = False,
+) -> dict[str, Any]:
+    server_dir.mkdir(parents=True, exist_ok=True)
+    server_jar = server_dir / "server.jar"
+    temporary_jar = server_dir / "server.jar.download"
 
-    if SERVER_JAR.exists() and not overwrite:
+    if server_jar.exists() and not overwrite:
         raise DownloadError(
-            "A server.jar already exists. Set overwrite to true to replace it."
+            f"A server.jar already exists for '{server_dir.name}'."
         )
 
     version = _find_version(version_id)
     metadata_url = version.get("url")
-
     if not metadata_url:
-        raise DownloadError(
-            f"No metadata URL was supplied for Minecraft {version_id}."
-        )
+        raise DownloadError(f"No metadata URL was supplied for Minecraft {version_id}.")
 
     metadata = _load_json(str(metadata_url))
     server_download = metadata.get("downloads", {}).get("server")
-
     if not server_download:
         raise DownloadError(
             f"Minecraft {version_id} does not provide a downloadable server."
@@ -140,26 +124,23 @@ def download_server(version_id: str, overwrite: bool = False) -> dict[str, Any]:
 
     download_url = server_download.get("url")
     expected_sha1 = server_download.get("sha1")
-
     if not download_url or not expected_sha1:
         raise DownloadError(
             f"Download information for Minecraft {version_id} is incomplete."
         )
 
-    TEMP_SERVER_JAR.unlink(missing_ok=True)
-
+    temporary_jar.unlink(missing_ok=True)
     total_bytes = _download_file(
         url=str(download_url),
-        destination=TEMP_SERVER_JAR,
+        destination=temporary_jar,
         expected_sha1=str(expected_sha1),
     )
-
-    shutil.move(str(TEMP_SERVER_JAR), str(SERVER_JAR))
+    shutil.move(str(temporary_jar), str(server_jar))
 
     return {
         "success": True,
         "version": version_id,
-        "file": str(SERVER_JAR),
+        "file": str(server_jar),
         "size_bytes": total_bytes,
         "sha1": str(expected_sha1),
     }
