@@ -37,16 +37,42 @@ else
   git -C "$PI_GEN_DIR" reset --hard origin/arm64
 fi
 
-# GitHub's setup-qemu action already installs a persistent host-side binfmt
-# handler. pi-gen's Docker wrapper normally runs dpkg-reconfigure inside a
-# privileged container, which can overwrite that working host registration
-# with an interpreter path that only exists inside the container. Skip only
-# that reconfiguration in GitHub Actions; local pi-gen behavior is unchanged.
+# GitHub's setup-qemu action already installs a working host-side binfmt
+# handler. Reconfiguring qemu-user-binfmt inside pi-gen's privileged container
+# can replace it with an unusable interpreter path. Replace only the exact
+# command token with `true`; avoid inserting quoted text into pi-gen's nested
+# bash -c string. Verify the expected upstream line before and after editing.
 if [ "${GITHUB_ACTIONS:-false}" = "true" ]; then
-  echo "Preserving GitHub Actions ARM64 binfmt registration..."
-  sed -i \
-    's/dpkg-reconfigure qemu-user-binfmt &&/echo "Using existing GitHub Actions binfmt registration" \&\&/' \
-    "$PI_GEN_DIR/build-docker.sh"
+  docker_script="$PI_GEN_DIR/build-docker.sh"
+  expected='    dpkg-reconfigure qemu-user-binfmt &&'
+  replacement='    true &&'
+
+  match_count="$(grep -Fxc "$expected" "$docker_script" || true)"
+  if [ "$match_count" -ne 1 ]; then
+    echo "ERROR: Expected exactly one qemu-user-binfmt line in pi-gen build-docker.sh; found $match_count."
+    exit 1
+  fi
+
+  python3 - "$docker_script" "$expected" "$replacement" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+expected = sys.argv[2]
+replacement = sys.argv[3]
+text = path.read_text()
+old = expected + "\n"
+new = replacement + "\n"
+if text.count(old) != 1:
+    raise SystemExit("expected qemu-user-binfmt command was not unique")
+path.write_text(text.replace(old, new, 1))
+PY
+
+  grep -Fqx "$replacement" "$docker_script" || {
+    echo "ERROR: Failed to apply the GitHub Actions QEMU compatibility patch."
+    exit 1
+  }
+  echo "Using GitHub Actions ARM64 binfmt registration."
 fi
 
 # pi-gen itself has a FILE named 'config'. Keep MineBox's configuration at
@@ -57,7 +83,6 @@ rm -rf "$PI_GEN_DIR/stage-minebox"
 cp -a "$ROOT_DIR/pi-gen/stage-minebox" "$PI_GEN_DIR/stage-minebox"
 
 # pi-gen only exports a disk image when the final stage contains this marker.
-# Create it explicitly after copying so CI cannot silently finish with no image.
 touch "$PI_GEN_DIR/stage-minebox/EXPORT_IMAGE"
 
 # Refresh the embedded application each build so local UI changes enter the image.
