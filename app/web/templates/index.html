@@ -1071,6 +1071,240 @@
             }
         }
 
+
+        /* MineBox Updates UI */
+
+        .update-panel {
+            grid-column: 1 / -1;
+            scroll-margin-top: 24px;
+        }
+
+        .update-header-copy {
+            display: grid;
+            gap: 5px;
+        }
+
+        .update-header-actions {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+
+        .update-button {
+            min-height: 40px;
+            padding: 0 15px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text);
+            background: var(--panel-light);
+            font: inherit;
+            font-size: 12px;
+            font-weight: 800;
+            cursor: pointer;
+        }
+
+        .update-button:hover:not(:disabled) {
+            border-color: rgba(101, 212, 110, 0.55);
+        }
+
+        .update-button.primary {
+            border-color: rgba(101, 212, 110, 0.5);
+            color: #071009;
+            background: var(--green);
+        }
+
+        .update-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .update-status-badge {
+            display: inline-flex;
+            min-height: 28px;
+            padding: 0 10px;
+            align-items: center;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            color: var(--muted);
+            background: rgba(255, 255, 255, 0.04);
+            font-size: 11px;
+            font-weight: 850;
+            white-space: nowrap;
+        }
+
+        .update-status-badge.up_to_date,
+        .update-status-badge.success {
+            border-color: rgba(101, 212, 110, 0.38);
+            color: #a9efae;
+            background: rgba(101, 212, 110, 0.09);
+        }
+
+        .update-status-badge.update_available,
+        .update-status-badge.checking,
+        .update-status-badge.updating {
+            border-color: rgba(255, 199, 95, 0.42);
+            color: #ffd47c;
+            background: rgba(255, 199, 95, 0.09);
+        }
+
+        .update-status-badge.failed {
+            border-color: rgba(255, 104, 104, 0.42);
+            color: #ffaaaa;
+            background: rgba(255, 104, 104, 0.09);
+        }
+
+        .update-message {
+            display: none;
+            margin-bottom: 17px;
+            padding: 12px 14px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--muted);
+            background: rgba(8, 13, 19, 0.55);
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .update-message.visible {
+            display: block;
+        }
+
+        .update-message.success {
+            border-color: rgba(101, 212, 110, 0.35);
+            color: #a9efae;
+            background: rgba(101, 212, 110, 0.08);
+        }
+
+        .update-message.warning {
+            border-color: rgba(255, 199, 95, 0.38);
+            color: #ffd47c;
+            background: rgba(255, 199, 95, 0.08);
+        }
+
+        .update-message.error {
+            border-color: rgba(255, 104, 104, 0.38);
+            color: #ffaaaa;
+            background: rgba(255, 104, 104, 0.08);
+        }
+
+        .update-content {
+            display: grid;
+            grid-template-columns:
+                minmax(280px, 0.8fr)
+                minmax(0, 1.2fr);
+            gap: 18px;
+        }
+
+        .update-details {
+            display: grid;
+            align-content: start;
+            grid-template-columns:
+                repeat(2, minmax(0, 1fr));
+            gap: 11px;
+        }
+
+        .update-detail {
+            min-width: 0;
+            padding: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.025);
+        }
+
+        .update-label {
+            display: block;
+            margin-bottom: 7px;
+            color: var(--muted);
+            font-size: 10px;
+            font-weight: 850;
+            letter-spacing: 0.07em;
+            text-transform: uppercase;
+        }
+
+        .update-value {
+            display: block;
+            overflow: hidden;
+            color: var(--text);
+            font-size: 13px;
+            font-weight: 800;
+            overflow-wrap: anywhere;
+        }
+
+        .update-value.success {
+            color: #a9efae;
+        }
+
+        .update-value.warning {
+            color: #ffd47c;
+        }
+
+        .update-value.error {
+            color: #ffaaaa;
+        }
+
+        .update-log-section {
+            display: grid;
+            min-width: 0;
+            gap: 10px;
+        }
+
+        .update-log-heading {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+        }
+
+        .update-log-title {
+            margin: 0;
+            font-size: 14px;
+        }
+
+        .update-log {
+            min-height: 250px;
+            max-height: 360px;
+            overflow: auto;
+            margin: 0;
+            padding: 15px;
+            border: 1px solid #202b38;
+            border-radius: 12px;
+            color: #b9c7b9;
+            background: #05080c;
+            font-family:
+                "Cascadia Code",
+                "SFMono-Regular",
+                Consolas,
+                monospace;
+            font-size: 12px;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+        }
+
+        @media (max-width: 900px) {
+            .update-content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 620px) {
+            .update-header-actions {
+                width: 100%;
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .update-button {
+                width: 100%;
+            }
+
+            .update-details {
+                grid-template-columns: 1fr;
+            }
+        }
+
     </style>
 </head>
 
@@ -1116,6 +1350,12 @@
                 <a class="nav-item" href="#console">
                     <span class="nav-icon">›_</span>
                     <span class="nav-text">Console</span>
+                </a>
+
+
+                <a class="nav-item" href="#updates">
+                    <span class="nav-icon">↻</span>
+                    <span class="nav-text">Updates</span>
                 </a>
 
                 <a class="nav-item" href="/setup">
@@ -1565,6 +1805,177 @@
                     </div>
                 </article>
 
+
+                <article
+                    class="panel section update-panel"
+                    id="updates"
+                >
+                    <div class="section-header">
+                        <div class="update-header-copy">
+                            <h2 class="section-title">
+                                MineBox updates
+                            </h2>
+
+                            <span
+                                class="section-note"
+                                id="update-refresh-note"
+                            >
+                                Loading update information…
+                            </span>
+                        </div>
+
+                        <div class="update-header-actions">
+                            <span
+                                class="update-status-badge"
+                                id="update-status-badge"
+                            >
+                                Loading
+                            </span>
+
+                            <button
+                                type="button"
+                                class="update-button"
+                                id="update-check-button"
+                            >
+                                Check for Updates
+                            </button>
+
+                            <button
+                                type="button"
+                                class="update-button primary"
+                                id="update-install-button"
+                                disabled
+                            >
+                                Install Update
+                            </button>
+                        </div>
+                    </div>
+
+                    <div
+                        class="update-message"
+                        id="update-message"
+                        role="status"
+                        aria-live="polite"
+                    ></div>
+
+                    <div class="update-content">
+                        <div class="update-details">
+                            <div class="update-detail">
+                                <span class="update-label">
+                                    Current version
+                                </span>
+                                <strong
+                                    class="update-value"
+                                    id="update-version-value"
+                                >
+                                    —
+                                </strong>
+                            </div>
+
+                            <div class="update-detail">
+                                <span class="update-label">
+                                    Current commit
+                                </span>
+                                <strong
+                                    class="update-value"
+                                    id="update-current-commit-value"
+                                >
+                                    —
+                                </strong>
+                            </div>
+
+                            <div class="update-detail">
+                                <span class="update-label">
+                                    Latest commit
+                                </span>
+                                <strong
+                                    class="update-value"
+                                    id="update-latest-commit-value"
+                                >
+                                    —
+                                </strong>
+                            </div>
+
+                            <div class="update-detail">
+                                <span class="update-label">
+                                    Update channel
+                                </span>
+                                <strong
+                                    class="update-value"
+                                    id="update-channel-value"
+                                >
+                                    —
+                                </strong>
+                            </div>
+
+                            <div class="update-detail">
+                                <span class="update-label">
+                                    Branch
+                                </span>
+                                <strong
+                                    class="update-value"
+                                    id="update-branch-value"
+                                >
+                                    —
+                                </strong>
+                            </div>
+
+                            <div class="update-detail">
+                                <span class="update-label">
+                                    Repository
+                                </span>
+                                <strong
+                                    class="update-value"
+                                    id="update-repository-value"
+                                >
+                                    —
+                                </strong>
+                            </div>
+
+                            <div class="update-detail">
+                                <span class="update-label">
+                                    Working tree
+                                </span>
+                                <strong
+                                    class="update-value"
+                                    id="update-local-changes-value"
+                                >
+                                    —
+                                </strong>
+                            </div>
+
+                            <div class="update-detail">
+                                <span class="update-label">
+                                    Update service
+                                </span>
+                                <strong
+                                    class="update-value"
+                                    id="update-service-value"
+                                >
+                                    —
+                                </strong>
+                            </div>
+                        </div>
+
+                        <div class="update-log-section">
+                            <div class="update-log-heading">
+                                <h3 class="update-log-title">
+                                    Update log
+                                </h3>
+
+                                <span class="section-note">
+                                    Latest 150 lines
+                                </span>
+                            </div>
+
+                            <pre
+                                class="update-log"
+                                id="update-log"
+                            >Loading update log…</pre>
+                        </div>
+                    </div>
+                </article>
+
                 <article class="panel section console" id="console">
                     <div class="section-header">
                         <h2 class="section-title">
@@ -1633,6 +2044,12 @@
             </section>
         </main>
     </div>
+
+
+    <script
+        src="/static/js/updates.js"
+        defer
+    ></script>
 
     <script>
         const statusLight =
