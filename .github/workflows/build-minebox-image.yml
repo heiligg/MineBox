@@ -1,0 +1,67 @@
+name: Build MineBox OS Image
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-minebox-image.yml"
+      - "MineBox-OS-Builder-v0.2/**"
+
+concurrency:
+  group: minebox-image-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-image:
+    name: Build Raspberry Pi 5 image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out MineBox
+        uses: actions/checkout@v4
+
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo docker system prune --all --force || true
+          df -h
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git rsync coreutils xz-utils zip unzip qemu-user-static binfmt-support
+
+      - name: Build MineBox OS
+        working-directory: MineBox-OS-Builder-v0.2
+        run: |
+          chmod +x build.sh check-project.sh
+          ./build.sh --docker
+
+      - name: Show build output
+        if: always()
+        run: |
+          find MineBox-OS-Builder-v0.2/output -maxdepth 1 -type f -printf '%f %s bytes\n' 2>/dev/null || true
+          df -h
+
+      - name: Upload MineBox image
+        uses: actions/upload-artifact@v4
+        with:
+          name: MineBox-OS-Raspberry-Pi-5-${{ github.run_number }}
+          path: |
+            MineBox-OS-Builder-v0.2/output/*.img
+            MineBox-OS-Builder-v0.2/output/*.img.xz
+            MineBox-OS-Builder-v0.2/output/*.img.gz
+            MineBox-OS-Builder-v0.2/output/*.zip
+            MineBox-OS-Builder-v0.2/output/*.bmap
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
