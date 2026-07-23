@@ -34,6 +34,15 @@ jobs:
           sudo docker system prune --all --force || true
           df -h
 
+      - name: Set up ARM64 emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Verify ARM64 emulator
+        run: |
+          docker run --rm --platform linux/arm64 debian:bookworm uname -m
+
       - name: Install build dependencies
         run: |
           sudo apt-get update
