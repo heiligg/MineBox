@@ -10,12 +10,12 @@ User=root
 Group=root
 WorkingDirectory=/opt/minebox
 
-Environment=PYTHONPATH=/opt/minebox/app
+Environment=PYTHONPATH=/opt/minebox
 Environment=MINEBOX_NETWORK_CHECK_INTERVAL=15
 Environment=MINEBOX_NETWORK_STARTUP_GRACE=45
 EnvironmentFile=-/etc/minebox/network.conf
 
-ExecStart=/usr/bin/python3 /opt/minebox/app/services/network_guard.py
+ExecStart=/usr/bin/python3 /opt/minebox/services/network_guard.py
 
 Restart=always
 RestartSec=5
