@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -71,9 +72,9 @@ def _save_registry(data: dict[str, Any]) -> None:
 
 def list_servers() -> list[ServerInstance]:
     registry = _load_registry()
-    servers: list[ServerInstance] = []
+    server_instances: list[ServerInstance] = []
     for server_id, raw in registry["servers"].items():
-        servers.append(
+        server_instances.append(
             ServerInstance(
                 server_id=server_id,
                 name=str(raw.get("name", server_id)),
@@ -84,7 +85,7 @@ def list_servers() -> list[ServerInstance]:
                 rcon_port=int(raw.get("rcon_port", 25575)),
             )
         )
-    return sorted(servers, key=lambda item: item.name.lower())
+    return sorted(server_instances, key=lambda item: item.name.lower())
 
 
 def get_server(server_id: str) -> ServerInstance:
@@ -98,8 +99,8 @@ def get_server(server_id: str) -> ServerInstance:
 def active_server_id() -> str | None:
     ensure_layout()
     if not ACTIVE_SERVER_FILE.exists():
-        servers = list_servers()
-        return servers[0].server_id if servers else None
+        server_instances = list_servers()
+        return server_instances[0].server_id if server_instances else None
     value = ACTIVE_SERVER_FILE.read_text(encoding="utf-8").strip()
     return value or None
 
@@ -168,3 +169,25 @@ def remove_server_record(server_id: str) -> None:
             set_active_server(remaining[0].server_id)
         else:
             ACTIVE_SERVER_FILE.unlink(missing_ok=True)
+
+
+def delete_server(server_id: str) -> ServerInstance:
+    instance = get_server(server_id)
+    directory = Path(instance.directory).resolve()
+    servers_root = SERVERS_DIR.resolve()
+
+    if directory.parent != servers_root:
+        raise ServerManagerError(
+            f"Refusing to delete server directory outside '{servers_root}'."
+        )
+
+    try:
+        if directory.exists():
+            shutil.rmtree(directory)
+    except OSError as error:
+        raise ServerManagerError(
+            f"Could not delete the files for '{instance.name}': {error}"
+        ) from error
+
+    remove_server_record(instance.server_id)
+    return instance
