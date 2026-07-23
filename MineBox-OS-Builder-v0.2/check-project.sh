@@ -2,12 +2,11 @@
 set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-required=(
+required_nonempty=(
   "config/minebox-pi5.conf"
   "app/main.py"
   "app/menu.py"
   "pi-gen/stage-minebox/prerun.sh"
-  "pi-gen/stage-minebox/EXPORT_IMAGE"
   "pi-gen/stage-minebox/00-install-minebox/00-packages"
   "pi-gen/stage-minebox/00-install-minebox/00-run.sh"
   "pi-gen/stage-minebox/00-install-minebox/00-run-chroot.sh"
@@ -22,9 +21,15 @@ required=(
   "pi-gen/stage-minebox/02-dedicated-hotspot/files/10-minebox-unmanaged.conf"
 )
 
-for item in "${required[@]}"; do
+for item in "${required_nonempty[@]}"; do
   [ -s "$ROOT_DIR/$item" ] || { echo "Missing or empty required file: $item"; exit 1; }
 done
+
+# EXPORT_IMAGE is intentionally an empty pi-gen marker. It only needs to exist.
+[ -e "$ROOT_DIR/pi-gen/stage-minebox/EXPORT_IMAGE" ] || {
+  echo "Missing required pi-gen marker: pi-gen/stage-minebox/EXPORT_IMAGE"
+  exit 1
+}
 
 if [ -e "$ROOT_DIR/pi-gen/config" ]; then
   echo "Invalid layout: pi-gen/config must not exist. pi-gen reserves 'config' as a file."
