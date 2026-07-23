@@ -15,7 +15,7 @@ case "$MODE" in
   *) echo "Usage: ./build.sh [--docker|--native]"; exit 2 ;;
 esac
 
-for command in git rsync realpath; do
+for command in git rsync realpath python3; do
   command -v "$command" >/dev/null 2>&1 || {
     echo "Missing required command: $command"
     exit 1
@@ -38,11 +38,9 @@ else
 fi
 
 # GitHub Actions already verifies ARM64 execution with an actual ARM64 Docker
-# container before this script runs. pi-gen's host checks can reject that valid
-# setup because its probe does not understand the setup-qemu-action registration.
-# In CI only, bypass the redundant host probe and avoid reconfiguring binfmt from
-# inside the privileged build container. Verify the exact upstream text first so
-# future pi-gen changes fail clearly instead of being patched incorrectly.
+# container. pi-gen's host checks can reject that valid setup because its probe
+# does not understand the setup-qemu-action registration. In CI only, bypass
+# that redundant probe and avoid replacing the host binfmt registration.
 if [ "${GITHUB_ACTIONS:-false}" = "true" ]; then
   docker_script="$PI_GEN_DIR/build-docker.sh"
 
@@ -52,12 +50,10 @@ import sys
 
 path = Path(sys.argv[1])
 text = path.read_text()
-
 replacements = {
     "    dpkg-reconfigure qemu-user-binfmt &&\n": "    true &&\n",
     "binfmt_misc_required=1\n": "binfmt_misc_required=0\n",
 }
-
 for old, new in replacements.items():
     count = text.count(old)
     if count != 1:
@@ -65,7 +61,6 @@ for old, new in replacements.items():
             f"expected exactly one upstream pi-gen fragment, found {count}: {old.strip()}"
         )
     text = text.replace(old, new, 1)
-
 path.write_text(text)
 PY
 
@@ -80,37 +75,72 @@ PY
   echo "Using GitHub Actions ARM64 binfmt registration."
 fi
 
-# pi-gen itself has a FILE named 'config'. Keep MineBox's configuration at
-# the repository root under a different filename. Do not create pi-gen/config/.
+# pi-gen itself has a FILE named 'config'. Keep MineBox's configuration at the
+# repository root under a different filename.
 install -m 0644 "$ROOT_DIR/config/minebox-pi5.conf" "$PI_GEN_CONFIG"
 
 rm -rf "$PI_GEN_DIR/stage-minebox"
 cp -a "$ROOT_DIR/pi-gen/stage-minebox" "$PI_GEN_DIR/stage-minebox"
+CUSTOM_STAGE="$PI_GEN_DIR/stage-minebox"
 
-# Every custom pi-gen stage must begin with the completed root filesystem from
-# the previous stage. Without this hook, stage-minebox has no rootfs to chroot
-# into and fails immediately when its package step starts.
-cat > "$PI_GEN_DIR/stage-minebox/PRERUN.sh" <<'EOF'
+# pi-gen recognizes the stage hook as lowercase prerun.sh. Ensure that exact
+# file exists, contains the rootfs handoff, and is executable. Remove the
+# incorrectly named uppercase variant so it cannot hide future mistakes.
+rm -f "$CUSTOM_STAGE/PRERUN.sh"
+cat > "$CUSTOM_STAGE/prerun.sh" <<'EOF'
 #!/bin/bash -e
 
 if [ ! -d "${ROOTFS_DIR}" ]; then
   copy_previous
 fi
 EOF
-chmod 0755 "$PI_GEN_DIR/stage-minebox/PRERUN.sh"
+chmod 0755 "$CUSTOM_STAGE/prerun.sh"
+
+# Normalize all pi-gen stage scripts because executable bits can be lost when
+# files are copied, edited through APIs, or checked out on another platform.
+while IFS= read -r -d '' script; do
+  chmod 0755 "$script"
+  bash -n "$script"
+done < <(find "$CUSTOM_STAGE" -type f \( -name '*-run.sh' -o -name 'prerun.sh' \) -print0)
+
+required_stage_files=(
+  "$CUSTOM_STAGE/prerun.sh"
+  "$CUSTOM_STAGE/00-install-minebox/00-packages"
+  "$CUSTOM_STAGE/00-install-minebox/00-run.sh"
+  "$CUSTOM_STAGE/00-install-minebox/00-run-chroot.sh"
+  "$CUSTOM_STAGE/01-system-config/00-run.sh"
+  "$CUSTOM_STAGE/01-system-config/00-run-chroot.sh"
+)
+for required_file in "${required_stage_files[@]}"; do
+  [ -s "$required_file" ] || {
+    echo "ERROR: Missing or empty custom-stage file: $required_file"
+    exit 1
+  }
+done
+
+grep -Fq 'copy_previous' "$CUSTOM_STAGE/prerun.sh" || {
+  echo "ERROR: stage-minebox/prerun.sh does not inherit the previous rootfs."
+  exit 1
+}
 
 # pi-gen only exports a disk image when the final stage contains this marker.
-touch "$PI_GEN_DIR/stage-minebox/EXPORT_IMAGE"
+touch "$CUSTOM_STAGE/EXPORT_IMAGE"
 
 # Refresh the embedded application each build so local UI changes enter the image.
-rm -rf "$PI_GEN_DIR/stage-minebox/00-install-minebox/files/minebox"
-mkdir -p "$PI_GEN_DIR/stage-minebox/00-install-minebox/files/minebox"
+rm -rf "$CUSTOM_STAGE/00-install-minebox/files/minebox"
+mkdir -p "$CUSTOM_STAGE/00-install-minebox/files/minebox"
 rsync -a --delete \
   --exclude='__pycache__' \
   --exclude='*.pyc' \
   "$ROOT_DIR/app/" \
-  "$PI_GEN_DIR/stage-minebox/00-install-minebox/files/minebox/"
+  "$CUSTOM_STAGE/00-install-minebox/files/minebox/"
 
+# Catch Python syntax errors after the exact application payload has been staged.
+python3 -m compileall -q "$CUSTOM_STAGE/00-install-minebox/files/minebox"
+find "$CUSTOM_STAGE/00-install-minebox/files/minebox" -type d -name __pycache__ -prune -exec rm -rf {} +
+find "$CUSTOM_STAGE/00-install-minebox/files/minebox" -type f -name '*.pyc' -delete
+
+echo "Custom MineBox stage preflight passed."
 cd "$PI_GEN_DIR"
 
 if [ "$MODE" = "--docker" ]; then
