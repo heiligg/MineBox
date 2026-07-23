@@ -4,6 +4,11 @@
 rm -f /etc/NetworkManager/system-connections/MineBox-Hotspot.nmconnection
 rm -f /etc/NetworkManager/system-connections/MineBox-Setup.nmconnection
 
+# Explicitly point Debian's hostapd service at the MineBox configuration.
+cat >/etc/default/hostapd <<'CONF'
+DAEMON_CONF="/etc/hostapd/hostapd.conf"
+CONF
+
 # Raspberry Pi OS masks hostapd after package installation until it is configured.
 systemctl unmask hostapd.service
 systemctl enable systemd-networkd.service
@@ -17,11 +22,6 @@ cat >/etc/systemd/system/hostapd.service.d/minebox.conf <<'CONF'
 [Unit]
 After=systemd-networkd.service
 Wants=systemd-networkd.service
-CONF
-
-# Ensure wireless is not left blocked by a previous saved rfkill state.
-mkdir -p /etc/systemd/system/hostapd.service.d
-cat >>/etc/systemd/system/hostapd.service.d/minebox.conf <<'CONF'
 
 [Service]
 ExecStartPre=/usr/sbin/rfkill unblock wifi
