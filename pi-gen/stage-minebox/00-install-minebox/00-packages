@@ -12,3 +12,4 @@ zip
 unzip
 python3-fastapi
 uvicorn
+python3-jinja2

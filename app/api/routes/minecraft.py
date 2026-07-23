@@ -57,3 +57,34 @@ def stop():
 @router.post("/restart")
 def restart():
     return run_action("restart", minecraft.restart)
+
+
+# MineBox Server Settings Routes v1
+
+@router.get("/settings")
+def server_settings():
+    result = minecraft.read_server_settings()
+
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=500,
+            detail=result,
+        )
+
+    return result
+
+
+@router.put("/settings")
+def update_server_settings(
+    payload: dict[str, Any],
+):
+    result = minecraft.save_server_settings(payload)
+
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=result.get("status_code", 400),
+            detail=result,
+        )
+
+    return result
+

@@ -1,145 +1,72 @@
-from __future__ import annotations
+from api.routes import console_command
+from pathlib import Path
 
-from typing import Any, Callable
-
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
-from services import minecraft
-from services import monitoring
+from api.routes.console import router as console_router
+from api.routes.dashboard import router as dashboard_router
+from api.routes.health import router as health_router
+from api.routes.minecraft import router as minecraft_router
+from api.routes.system import router as system_router
+from api.routes.setup import router as setup_router
 
+from starlette.middleware.sessions import SessionMiddleware
+from api.routes.auth import router as auth_router
+from services import auth
+from core.security import AuthenticationMiddleware
+APP_DIR = Path(__file__).resolve().parent.parent
+STATIC_DIR = APP_DIR / "web" / "static"
 
-API_VERSION = "0.1.0"
+from api.routes import backups
 
 app = FastAPI(
     title="MineBox API",
-    description="Local management API for the MineBox Minecraft server appliance.",
-    version=API_VERSION,
+    version="0.1.0",
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/api/v1/openapi.json",
 )
 
+# Register the authentication gate first.
+# Starlette applies middleware in reverse registration order.
+app.add_middleware(AuthenticationMiddleware)
 
-def minecraft_status() -> dict[str, Any]:
-    return {
-        "running": minecraft.is_running(),
-        "status": minecraft.status_text(),
-        "players": minecraft.player_count_text(),
-        "version": minecraft.version(),
-        "uptime": minecraft.uptime(),
-    }
-
-
-def system_status() -> dict[str, Any]:
-    sample = monitoring.sample()
-
-    return {
-        "cpu_percent": sample.cpu,
-        "memory_percent": sample.memory,
-        "minecraft_memory_mb": sample.server_memory_mb,
-    }
-
-
-def run_minecraft_action(
-    action: str,
-    function: Callable[[], Any],
-) -> dict[str, Any]:
-    result = function()
-
-    payload = {
-        "ok": bool(result.ok),
-        "action": action,
-        "message": (
-            result.stdout
-            or result.stderr
-            or f"Minecraft {action} command completed."
-        ),
-        "minecraft": minecraft_status(),
-    }
-
-    if not result.ok:
-        raise HTTPException(
-            status_code=500,
-            detail=payload,
-        )
-
-    return payload
-
-
-@app.get(
-    "/",
-    include_in_schema=False,
+# Register sessions last so SessionMiddleware is the outer layer and
+# request.session exists before AuthenticationMiddleware runs.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=auth.get_session_secret(),
+    session_cookie="minebox_session",
+    max_age=60 * 60 * 24 * 14,
+    same_site="lax",
+    https_only=False,
 )
-def root() -> RedirectResponse:
-    return RedirectResponse(url="/docs")
 
 
-@app.get(
-    "/api/v1/health",
-    tags=["System"],
+
+
+app.mount(
+    "/static",
+    StaticFiles(directory=STATIC_DIR),
+    name="static",
 )
-def health() -> dict[str, Any]:
-    return {
-        "ok": True,
-        "service": "minebox-api",
-        "version": API_VERSION,
-    }
+
+from api.routes import network
+
+app.include_router(auth_router)
+app.include_router(dashboard_router)
+app.include_router(health_router)
+app.include_router(system_router)
+app.include_router(minecraft_router)
+app.include_router(console_router)
+app.include_router(setup_router)
+app.include_router(console_command.router)
+app.include_router(backups.router)
+app.include_router(network.router)
 
 
-@app.get(
-    "/api/v1/system",
-    tags=["System"],
-)
-def get_system_status() -> dict[str, Any]:
-    return {
-        "ok": True,
-        "system": system_status(),
-    }
-
-
-@app.get(
-    "/api/v1/minecraft",
-    tags=["Minecraft"],
-)
-def get_minecraft_status() -> dict[str, Any]:
-    return {
-        "ok": True,
-        "minecraft": minecraft_status(),
-    }
-
-
-@app.get(
-    "/api/v1/status",
-    tags=["System"],
-)
-def get_complete_status() -> dict[str, Any]:
-    return {
-        "ok": True,
-        "system": system_status(),
-        "minecraft": minecraft_status(),
-    }
-
-
-@app.post(
-    "/api/v1/minecraft/start",
-    tags=["Minecraft"],
-)
-def start_minecraft() -> dict[str, Any]:
-    return run_minecraft_action("start", minecraft.start)
-
-
-@app.post(
-    "/api/v1/minecraft/stop",
-    tags=["Minecraft"],
-)
-def stop_minecraft() -> dict[str, Any]:
-    return run_minecraft_action("stop", minecraft.stop)
-
-
-@app.post(
-    "/api/v1/minecraft/restart",
-    tags=["Minecraft"],
-)
-def restart_minecraft() -> dict[str, Any]:
-    return run_minecraft_action("restart", minecraft.restart)
+@app.get("/docs-home", include_in_schema=False)
+def docs_home():
+    return RedirectResponse("/docs")

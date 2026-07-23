@@ -26,3 +26,19 @@ __pycache__/
 # Editor settings
 .vscode/
 .idea/
+
+# MineBox local development backups
+*.backup
+*.backup-*
+*.bak
+backups/
+
+# Python generated files
+__pycache__/
+*.py[cod]
+
+# MineBox runtime secrets and state
+auth.json
+network.conf
+.minebox-rcon-password
+.minebox-setup-complete
