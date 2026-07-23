@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from services import minecraft
 from services import monitoring
+from services import servers
 
 
 router = APIRouter(
@@ -13,12 +14,19 @@ router = APIRouter(
 
 
 def minecraft_status() -> dict[str, Any]:
+    active = servers.active_server()
+
     return {
         "running": minecraft.is_running(),
         "status": minecraft.status_text(),
         "players": minecraft.player_count_text(),
-        "version": minecraft.version(),
+        "version": active.version if active else minecraft.version(),
         "uptime": minecraft.uptime(),
+        "server_name": active.name if active else "Minecraft Server",
+        "server_id": active.server_id if active else None,
+        "port": active.port if active else 25565,
+        "rcon_port": active.rcon_port if active else 25575,
+        "memory_gb": active.memory_gb if active else None,
     }
 
 
