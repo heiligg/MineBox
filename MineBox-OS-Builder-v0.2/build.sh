@@ -37,12 +37,12 @@ else
   git -C "$PI_GEN_DIR" reset --hard origin/arm64
 fi
 
-# GitHub's setup-qemu action already proves ARM64 execution works by running an
-# ARM64 Docker container earlier in the workflow. pi-gen's wrapper performs an
-# additional host-shell binfmt probe that is incompatible with the runner's
-# container-managed registration, even though Docker emulation is functional.
-# In CI only, skip that redundant host probe and preserve the existing binfmt
-# registration instead of reconfiguring it inside the privileged container.
+# GitHub Actions already verifies ARM64 execution with an actual ARM64 Docker
+# container before this script runs. pi-gen's host checks can reject that valid
+# setup because its probe does not understand the setup-qemu-action registration.
+# In CI only, bypass the redundant host probe and avoid reconfiguring binfmt from
+# inside the privileged build container. Verify the exact upstream text first so
+# future pi-gen changes fail clearly instead of being patched incorrectly.
 if [ "${GITHUB_ACTIONS:-false}" = "true" ]; then
   docker_script="$PI_GEN_DIR/build-docker.sh"
 
@@ -52,31 +52,32 @@ import sys
 
 path = Path(sys.argv[1])
 text = path.read_text()
+
 replacements = {
-    "binfmt_misc_required=1\n": "binfmt_misc_required=0\n",
     "    dpkg-reconfigure qemu-user-binfmt &&\n": "    true &&\n",
+    "binfmt_misc_required=1\n": "binfmt_misc_required=0\n",
 }
 
 for old, new in replacements.items():
     count = text.count(old)
     if count != 1:
         raise SystemExit(
-            f"expected exactly one occurrence of {old.strip()!r}; found {count}"
+            f"expected exactly one upstream pi-gen fragment, found {count}: {old.strip()}"
         )
     text = text.replace(old, new, 1)
 
 path.write_text(text)
 PY
 
-  grep -Fqx 'binfmt_misc_required=0' "$docker_script" || {
-    echo "ERROR: Failed to disable pi-gen's redundant host ARM64 probe."
-    exit 1
-  }
   grep -Fqx '    true &&' "$docker_script" || {
-    echo "ERROR: Failed to preserve GitHub Actions QEMU registration."
+    echo "ERROR: Failed to disable container qemu-user-binfmt reconfiguration."
     exit 1
   }
-  echo "Using verified GitHub Actions Docker ARM64 emulation."
+  grep -Fqx 'binfmt_misc_required=0' "$docker_script" || {
+    echo "ERROR: Failed to disable the redundant pi-gen host ARM64 probe."
+    exit 1
+  }
+  echo "Using GitHub Actions ARM64 binfmt registration."
 fi
 
 # pi-gen itself has a FILE named 'config'. Keep MineBox's configuration at
@@ -85,6 +86,18 @@ install -m 0644 "$ROOT_DIR/config/minebox-pi5.conf" "$PI_GEN_CONFIG"
 
 rm -rf "$PI_GEN_DIR/stage-minebox"
 cp -a "$ROOT_DIR/pi-gen/stage-minebox" "$PI_GEN_DIR/stage-minebox"
+
+# Every custom pi-gen stage must begin with the completed root filesystem from
+# the previous stage. Without this hook, stage-minebox has no rootfs to chroot
+# into and fails immediately when its package step starts.
+cat > "$PI_GEN_DIR/stage-minebox/PRERUN.sh" <<'EOF'
+#!/bin/bash -e
+
+if [ ! -d "${ROOTFS_DIR}" ]; then
+  copy_previous
+fi
+EOF
+chmod 0755 "$PI_GEN_DIR/stage-minebox/PRERUN.sh"
 
 # pi-gen only exports a disk image when the final stage contains this marker.
 touch "$PI_GEN_DIR/stage-minebox/EXPORT_IMAGE"
