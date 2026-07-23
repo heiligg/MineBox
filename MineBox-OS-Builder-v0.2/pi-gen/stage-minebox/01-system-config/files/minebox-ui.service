@@ -1,0 +1,28 @@
+[Unit]
+Description=MineBox Appliance Interface
+After=network-online.target minebox-firstboot.service
+Wants=network-online.target
+Requires=minebox-firstboot.service
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+User=minebox
+Group=minebox
+SupplementaryGroups=video input render gpio
+WorkingDirectory=/opt/minebox
+Environment=TERM=linux
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/minebox/main.py
+Restart=always
+RestartSec=2
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+
+[Install]
+WantedBy=multi-user.target

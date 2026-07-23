@@ -1,0 +1,23 @@
+[Unit]
+Description=Minecraft Server
+ConditionPathExists=/opt/minecraft/server/server.jar
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=minecraft
+Group=minebox
+SupplementaryGroups=minebox
+WorkingDirectory=/opt/minecraft/server
+UMask=0002
+EnvironmentFile=-/etc/minebox/minecraft.env
+ExecStart=/usr/bin/java ${JAVA_MIN_RAM} ${JAVA_MAX_RAM} -jar server.jar nogui
+ExecStop=/bin/kill -SIGINT $MAINPID
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=120
+SuccessExitStatus=0 130 143
+
+[Install]
+WantedBy=multi-user.target

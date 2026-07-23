@@ -1,0 +1,9 @@
+[Unit]
+Description=MineBox scheduled Minecraft backup
+After=minecraft.service
+
+[Service]
+Type=oneshot
+User=minebox
+WorkingDirectory=/opt/minebox
+ExecStart=/usr/bin/python3 /opt/minebox/scripts/backup_runner.py

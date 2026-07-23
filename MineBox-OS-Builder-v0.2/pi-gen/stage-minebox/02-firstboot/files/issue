@@ -1,0 +1,4 @@
+MineBox OS recovery console
+
+The normal appliance interface runs on tty1.
+Use this console only for development or recovery.
