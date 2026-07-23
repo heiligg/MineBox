@@ -23,7 +23,7 @@ from api.routes import backups
 
 app = FastAPI(
     title="MineBox API",
-    version="0.1.0",
+    version="0.2.0",
     docs_url="/docs",
     redoc_url="/redoc",
     openapi_url="/api/v1/openapi.json",
@@ -54,6 +54,7 @@ app.mount(
 )
 
 from api.routes import network
+from api.routes import update
 
 app.include_router(auth_router)
 app.include_router(dashboard_router)
@@ -65,6 +66,7 @@ app.include_router(setup_router)
 app.include_router(console_command.router)
 app.include_router(backups.router)
 app.include_router(network.router)
+app.include_router(update.router)
 
 
 @app.get("/docs-home", include_in_schema=False)

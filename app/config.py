@@ -1,6 +1,6 @@
 from pathlib import Path
 
-APP_VERSION = "1.4.0-os-preview"
+APP_VERSION = "0.2.0"
 
 SERVICE_NAME = "minecraft.service"
 
