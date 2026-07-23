@@ -13,7 +13,7 @@ systemctl mask getty@tty1.service
 systemctl enable minebox-firstboot.service
 systemctl enable minebox-ui.service
 systemctl enable minecraft.service
-systemctl disable ssh.service || true
+systemctl enable ssh.service
 
 # Reduce console noise during the appliance boot.
 mkdir -p /etc/systemd/system.conf.d
