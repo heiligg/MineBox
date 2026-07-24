@@ -75,7 +75,7 @@ def resolved_branch() -> str | None:
     remote = resolved_remote()
     if not remote:
         return None
-    channel_defaults = {"stable": "main", "beta": "beta", "development": "main"}
+    channel_defaults = {"stable": "main", "beta": "beta", "development": "v0.3-alpha"}
     candidates = [UPDATE_BRANCH, channel_defaults.get(UPDATE_CHANNEL, "")]
     try:
         upstream = _git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
