@@ -1,0 +1,90 @@
+name: Build MineBox OS Image
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - v0.3-alpha
+    paths:
+      - '.github/workflows/build-minebox-image.yml'
+      - 'app/**'
+      - 'config/**'
+      - 'pi-gen/**'
+      - 'image/**'
+      - 'build.sh'
+      - 'check-project.sh'
+      - 'requirements.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: minebox-image-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-image:
+    name: Build Raspberry Pi image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out MineBox
+        uses: actions/checkout@v4
+        with:
+          ref: v0.3-alpha
+          fetch-depth: 1
+
+      - name: Free runner disk space
+        shell: bash
+        run: |
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          docker system prune --all --force || true
+          df -h
+
+      - name: Install host dependencies
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git rsync coreutils xz-utils zip
+
+      - name: Validate MineBox builder
+        shell: bash
+        run: |
+          chmod +x build.sh check-project.sh
+          find pi-gen/stage-minebox image/scripts -type f -name '*.sh' -exec chmod +x {} +
+          ./check-project.sh
+
+      - name: Build MineBox OS image
+        shell: bash
+        run: |
+          ./build.sh --docker
+
+      - name: List build output
+        if: always()
+        shell: bash
+        run: |
+          echo 'Workspace disk usage:'
+          df -h
+          echo 'Output files:'
+          find output -maxdepth 1 -type f -printf '%f %s bytes\n' 2>/dev/null || true
+          echo 'pi-gen deploy files:'
+          find .build/pi-gen/deploy -maxdepth 1 -type f -printf '%f %s bytes\n' 2>/dev/null || true
+
+      - name: Upload MineBox image
+        uses: actions/upload-artifact@v4
+        with:
+          name: MineBox-OS-v0.3-alpha-${{ github.run_number }}
+          path: |
+            output/*.img
+            output/*.img.xz
+            output/*.img.gz
+            output/*.zip
+            output/*.bmap
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
