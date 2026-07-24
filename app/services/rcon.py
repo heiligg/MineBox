@@ -2,121 +2,92 @@ from __future__ import annotations
 
 import socket
 import struct
-from pathlib import Path
+from config import RCON_HOST, RCON_PORT, RCON_PASSWORD
+from services.system import CommandResult
 
-from services import servers
-
-
-RCON_HOST = "127.0.0.1"
 SERVERDATA_AUTH = 3
 SERVERDATA_EXECCOMMAND = 2
+SERVERDATA_RESPONSE_VALUE = 0
 
 
-class RconError(RuntimeError):
-    pass
+def _packet(request_id: int, packet_type: int, body: str) -> bytes:
+    payload = struct.pack("<ii", request_id, packet_type) + body.encode("utf-8") + b"\x00\x00"
+    return struct.pack("<i", len(payload)) + payload
 
 
-def _active_instance() -> servers.ServerInstance:
-    instance = servers.active_server()
-    if instance is None:
-        raise RconError("No active Minecraft server is selected.")
-    return instance
-
-
-def _read_exact(sock: socket.socket, size: int) -> bytes:
+def _recv_exact(sock: socket.socket, length: int) -> bytes:
     data = bytearray()
-    while len(data) < size:
-        chunk = sock.recv(size - len(data))
+    while len(data) < length:
+        chunk = sock.recv(length - len(data))
         if not chunk:
-            raise RconError("RCON connection closed unexpectedly.")
+            raise ConnectionError("RCON connection closed unexpectedly")
         data.extend(chunk)
     return bytes(data)
 
 
-def _send_packet(
-    sock: socket.socket,
-    request_id: int,
-    packet_type: int,
-    body: str,
-) -> None:
-    payload = (
-        struct.pack("<ii", request_id, packet_type)
-        + body.encode("utf-8")
-        + b"\x00\x00"
-    )
-    sock.sendall(struct.pack("<i", len(payload)) + payload)
-
-
-def _read_packet(sock: socket.socket) -> tuple[int, int, str]:
-    packet_length = struct.unpack("<i", _read_exact(sock, 4))[0]
-    if packet_length < 10 or packet_length > 1024 * 1024:
-        raise RconError("Invalid RCON packet length.")
-    payload = _read_exact(sock, packet_length)
+def _recv_packet(sock: socket.socket) -> tuple[int, int, str]:
+    size = struct.unpack("<i", _recv_exact(sock, 4))[0]
+    if size < 10 or size > 10_000_000:
+        raise ValueError("Invalid RCON packet size")
+    payload = _recv_exact(sock, size)
     request_id, packet_type = struct.unpack("<ii", payload[:8])
     body = payload[8:-2].decode("utf-8", errors="replace")
     return request_id, packet_type, body
 
 
-def _password(instance: servers.ServerInstance) -> str:
-    password_file = Path(instance.directory) / ".minebox-rcon-password"
-    try:
-        password = password_file.read_text(encoding="utf-8").strip()
-    except OSError as error:
-        raise RconError(
-            "MineBox RCON password file could not be read."
-        ) from error
-    if not password:
-        raise RconError("MineBox RCON password is empty.")
-    return password
+def send(command: str, timeout: float = 4.0) -> CommandResult:
+    command = command.strip()
+    if not command:
+        return CommandResult(False, stderr="RCON command was empty.")
 
-
-def command(command_text: str) -> str:
-    instance = _active_instance()
-    password = _password(instance)
     try:
-        with socket.create_connection(
-            (RCON_HOST, int(instance.rcon_port)),
-            timeout=5,
-        ) as sock:
-            sock.settimeout(5)
-            _send_packet(sock, 1, SERVERDATA_AUTH, password)
-            auth_id, _, _ = _read_packet(sock)
-            if auth_id == -1:
-                raise RconError("RCON authentication failed.")
-            _send_packet(sock, 2, SERVERDATA_EXECCOMMAND, command_text)
-            response_id, _, response_body = _read_packet(sock)
+        with socket.create_connection((RCON_HOST, int(RCON_PORT)), timeout=timeout) as sock:
+            sock.settimeout(timeout)
+            auth_id = 100
+            sock.sendall(_packet(auth_id, SERVERDATA_AUTH, RCON_PASSWORD))
+            response_id, _response_type, _response_body = _recv_packet(sock)
             if response_id == -1:
-                raise RconError("RCON command failed.")
-            return response_body.strip()
-    except OSError as error:
-        raise RconError(
-            f"Could not connect to Minecraft RCON: {error}"
-        ) from error
+                return CommandResult(False, stderr="RCON authentication failed.")
+
+            command_id = 101
+            sock.sendall(_packet(command_id, SERVERDATA_EXECCOMMAND, command))
+            response_id, response_type, body = _recv_packet(sock)
+            if response_id != command_id:
+                return CommandResult(False, stderr="RCON returned an unexpected response.")
+            if response_type not in (SERVERDATA_RESPONSE_VALUE, SERVERDATA_EXECCOMMAND):
+                return CommandResult(False, stderr="RCON returned an invalid packet type.")
+            return CommandResult(True, stdout=body.strip())
+    except (OSError, ValueError, ConnectionError, struct.error) as exc:
+        return CommandResult(False, stderr=f"RCON unavailable: {exc}")
 
 
-def players() -> tuple[list[str], int]:
-    response = command("list")
-    if "/" not in response:
-        raise RconError(f"Unexpected player-list response: {response}")
+def command(command_text: str, timeout: float = 4.0) -> str:
+    result = send(command_text, timeout=timeout)
+    if not result.ok:
+        raise RuntimeError(result.message)
+    return result.stdout
 
-    prefix, _, names_text = response.partition(":")
-    words = prefix.replace("/", " ").split()
-    current = None
-    maximum = None
-    for index, word in enumerate(words):
-        if word.isdigit() and index + 1 < len(words):
-            next_word = words[index + 1]
-            if next_word.isdigit():
-                current = int(word)
-                maximum = int(next_word)
-                break
 
-    if current is None or maximum is None:
-        raise RconError(f"Could not parse player counts: {response}")
+def players() -> tuple[list[str], int] | None:
+    """Return the online player names and maximum player count via RCON."""
+    result = send("list")
+    if not result.ok:
+        return None
 
-    names = [
-        name.strip()
-        for name in names_text.split(",")
-        if name.strip()
-    ]
+    body = result.stdout.strip()
+    # Vanilla responses look like:
+    # "There are 0 of a max of 20 players online:"
+    # or "There are 2 of a max of 20 players online: Alex, Steve"
+    import re
+    match = re.search(
+        r"There are\s+(\d+)\s+of a max of\s+(\d+)\s+players online:?\s*(.*)",
+        body,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+
+    maximum = int(match.group(2))
+    names_text = match.group(3).strip()
+    names = [name.strip() for name in names_text.split(",") if name.strip()]
     return names, maximum

@@ -1,0 +1,23 @@
+{
+  "servers": {
+    "my-minebox-server": {
+      "directory": "/home/minebox/MineBox-OS-Builder-v0.2/runtime/minecraft/servers/my-minebox-server",
+      "memory_gb": 4,
+      "name": "My MineBox Server",
+      "port": 25565,
+      "rcon_port": 25575,
+      "server_id": "my-minebox-server",
+      "version": "1.12.2"
+    },
+    "server": {
+      "directory": "/home/minebox/MineBox-OS-Builder-v0.2/runtime/minecraft/servers/server",
+      "memory_gb": 4,
+      "name": "Server",
+      "port": 25565,
+      "rcon_port": 25575,
+      "server_id": "server",
+      "version": "1.12.2"
+    }
+  },
+  "version": 1
+}

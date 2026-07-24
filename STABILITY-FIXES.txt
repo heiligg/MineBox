@@ -1,0 +1,13 @@
+MineBox stability update
+
+- Removed the three-minute browser timeout from Minecraft server creation.
+  Slow downloads now continue until the backend finishes or returns a real error.
+- GitHub updates no longer stop because the working tree has uncommitted changes.
+  MineBox automatically stores tracked and untracked changes in a Git stash,
+  installs the selected remote branch, and reports the saved stash reference.
+- Update checks automatically use the configured remote, preferring "updates"
+  and then "origin", and default to the currently checked-out branch.
+- Development update status and logs are stored under runtime/updates so local
+  testing does not require access to /var/lib or /var/log.
+- The updater runs in the dashboard process when developing, so a missing
+  minebox-update.service no longer prevents GitHub updates.

@@ -883,14 +883,17 @@
 
         if (!available) {
             connectionText = "NetworkManager unavailable";
-        } else if (!wifiAvailable) {
-            connectionText = "No Wi-Fi adapter";
+        } else if (network.connected) {
+            connectionText =
+                network.connection_type === "ethernet"
+                    ? "Ethernet connected"
+                    : "Connected";
+            connectionClass = "online";
         } else if (hotspotActive) {
             connectionText = "Hotspot active";
             connectionClass = "warning";
-        } else if (network.connected) {
-            connectionText = "Connected";
-            connectionClass = "online";
+        } else if (!wifiAvailable) {
+            connectionText = "No Wi-Fi adapter";
         }
 
         setText(

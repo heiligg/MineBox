@@ -63,10 +63,12 @@ visudo -cf "$SUDOERS_FILE"
 install -m 0644 "$TARGET_DIR/services/minebox.service" /etc/systemd/system/minebox.service
 install -m 0644 "$TARGET_DIR/services/minebox-maintenance.service" /etc/systemd/system/minebox-maintenance.service
 install -m 0644 "$TARGET_DIR/services/minebox-maintenance.timer" /etc/systemd/system/minebox-maintenance.timer
+install -m 0644 "$TARGET_DIR/services/minebox-network.service" /etc/systemd/system/minebox-network.service
 
 systemctl daemon-reload
 systemctl enable minebox.service >/dev/null 2>&1 || true
 systemctl enable --now minebox-maintenance.timer
+systemctl enable --now minebox-network.service
 
 # Refresh current server files after applying the service umask override.
 if systemctl is-active --quiet minecraft.service; then
@@ -76,5 +78,6 @@ fi
 echo
 echo "MineBox 1.3.1 installed successfully."
 echo "Runtime features will not ask for a sudo password."
+echo "The automatic setup hotspot service is enabled."
 echo "Log out and back in once so the minebox group membership refreshes."
 echo "Then launch with: cd /opt/minebox && python3 main.py"

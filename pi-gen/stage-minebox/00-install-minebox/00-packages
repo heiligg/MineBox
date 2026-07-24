@@ -1,5 +1,6 @@
 python3
 python3-psutil
+python3-jinja2
 default-jre-headless
 acl
 sudo
@@ -10,6 +11,3 @@ network-manager
 openssh-server
 zip
 unzip
-python3-fastapi
-uvicorn
-python3-jinja2

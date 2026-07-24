@@ -1305,7 +1305,14 @@
             }
         }
 
-    </style>
+    
+        .active-server-name {
+            margin: -8px 0 16px;
+            font-size: 18px;
+            font-weight: 850;
+            overflow-wrap: anywhere;
+        }
+</style>
 </head>
 
 <body>
@@ -1347,6 +1354,11 @@
                     <span class="nav-text">Dashboard</span>
                 </a>
 
+                <a class="nav-item" href="/servers">
+                    <span class="nav-icon">▣</span>
+                    <span class="nav-text">Servers</span>
+                </a>
+
                 <a class="nav-item" href="#console">
                     <span class="nav-icon">›_</span>
                     <span class="nav-text">Console</span>
@@ -1379,7 +1391,7 @@
                 <div>
                     <h1 class="page-title">Server Dashboard</h1>
                     <p class="page-subtitle">
-                        Monitor and control your Minecraft appliance.
+                        Monitor and control {{ minecraft.server_name }}.
                     </p>
                 </div>
 
@@ -1391,7 +1403,8 @@
 
             <section class="hero">
                 <article class="panel server-card">
-                    <div class="status-label">Minecraft server</div>
+                    <div class="status-label">Active server</div>
+                    <div class="active-server-name">{{ minecraft.server_name }}</div>
 
                     <div class="server-status">
                         <span
@@ -1489,8 +1502,8 @@
                             Server port
                         </span>
 
-                        <strong class="quick-stat-value">
-                            25565
+                        <strong class="quick-stat-value" id="server-port-value">
+                            {{ minecraft.port }}
                         </strong>
                     </div>
                 </aside>
@@ -1703,7 +1716,7 @@
 
                     <div class="summary-row">
                         <span>Game port</span>
-                        <strong>25565</strong>
+                        <strong>{{ minecraft.port }}</strong>
                     </div>
 
                     <div class="summary-row">

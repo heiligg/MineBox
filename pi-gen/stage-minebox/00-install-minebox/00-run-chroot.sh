@@ -19,7 +19,7 @@ setfacl -R -d -m u:minebox:rwX,u:minecraft:rwX,g:minebox:rwX,m::rwX /opt/minecra
 
 install -m 0644 /opt/minebox/services/minebox-maintenance.service /etc/systemd/system/minebox-maintenance.service
 install -m 0644 /opt/minebox/services/minebox-maintenance.timer /etc/systemd/system/minebox-maintenance.timer
-install -m 0644 /opt/minebox/services/minebox-api.service /etc/systemd/system/minebox-api.service
+install -m 0644 /opt/minebox/services/minebox-network.service /etc/systemd/system/minebox-network.service
 
 cat >/etc/sudoers.d/minebox <<'SUDOERS'
 minebox ALL=(root) NOPASSWD: /usr/bin/systemctl start minecraft.service, /usr/bin/systemctl stop minecraft.service, /usr/bin/systemctl restart minecraft.service, /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot
@@ -31,4 +31,4 @@ mkdir -p /var/lib/minebox /var/log/minebox
 chown -R minebox:minebox /var/lib/minebox /var/log/minebox
 
 systemctl enable minebox-maintenance.timer
-systemctl enable minebox-api.service
+systemctl enable minebox-network.service

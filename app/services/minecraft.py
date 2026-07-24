@@ -1,31 +1,121 @@
 from __future__ import annotations
+import os
 import re
+import signal
+import subprocess
 import time
 from pathlib import Path
-from config import SERVICE_NAME, SERVER_LOG, SERVER_PROPERTIES
+from config import SERVICE_NAME
 from services.system import CommandResult, run
-from services import rcon
+from services import rcon, servers
+
+DEV_MODE = os.environ.get("MINEBOX_DEV_MODE", "0") == "1"
+
+
+def _active_dir() -> Path:
+    instance = servers.active_server()
+    if instance is not None:
+        return Path(instance.directory)
+    return servers.MINECRAFT_ROOT / "server"
+
+
+def _properties_path() -> Path:
+    return _active_dir() / "server.properties"
+
+
+def _log_path() -> Path:
+    return _active_dir() / "logs" / "latest.log"
+
+
+def _pid_path() -> Path:
+    return _active_dir() / ".minebox-server.pid"
+
+
+def _read_pid() -> int | None:
+    try:
+        return int(_pid_path().read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _pid_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
+
 
 def is_running() -> bool:
-    result = run([
-        "systemctl",
-        "show",
-        SERVICE_NAME,
-        "--property=ActiveState",
-        "--property=SubState",
-        "--value",
-    ])
+    if DEV_MODE:
+        pid = _read_pid()
+        if pid and _pid_running(pid):
+            return True
+        _pid_path().unlink(missing_ok=True)
+        return False
+    return run(["systemctl", "is-active", SERVICE_NAME]).stdout == "active"
 
-    states = [
-        line.strip()
-        for line in result.stdout.splitlines()
-        if line.strip()
-    ]
-
-    return states == ["active", "running"]
 
 def _service(action: str) -> CommandResult:
     return run(["sudo", "-n", "/usr/bin/systemctl", action, SERVICE_NAME], timeout=45)
+
+
+def _dev_start() -> CommandResult:
+    server_dir = _active_dir()
+    jar = server_dir / "server.jar"
+    start_script = server_dir / "start.sh"
+    if not jar.is_file():
+        return CommandResult(False, stderr=f"No server.jar was found in {server_dir}. Create a server first.")
+    if not start_script.is_file():
+        return CommandResult(False, stderr=f"No start.sh was found in {server_dir}.")
+    try:
+        log_dir = server_dir / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        console_log = log_dir / "minebox-console.log"
+        log_handle = console_log.open("ab", buffering=0)
+        process = subprocess.Popen(
+            [str(start_script)],
+            cwd=server_dir,
+            stdin=subprocess.DEVNULL,
+            stdout=log_handle,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        _pid_path().write_text(str(process.pid) + "\n", encoding="utf-8")
+        time.sleep(1)
+        if process.poll() is not None:
+            _pid_path().unlink(missing_ok=True)
+            return CommandResult(False, stderr=f"Minecraft exited immediately. Check {console_log}.")
+        return CommandResult(True, f"Minecraft started with PID {process.pid}.")
+    except OSError as exc:
+        return CommandResult(False, stderr=f"Could not start Minecraft: {exc}")
+
+
+def _dev_stop() -> CommandResult:
+    pid = _read_pid()
+    if not pid or not _pid_running(pid):
+        _pid_path().unlink(missing_ok=True)
+        return CommandResult(True, "Minecraft is already offline.")
+    try:
+        os.killpg(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        _pid_path().unlink(missing_ok=True)
+        return CommandResult(True, "Minecraft is already offline.")
+    except OSError as exc:
+        return CommandResult(False, stderr=f"Could not stop Minecraft: {exc}")
+    end = time.monotonic() + 20
+    while time.monotonic() < end:
+        if not _pid_running(pid):
+            _pid_path().unlink(missing_ok=True)
+            return CommandResult(True, "Minecraft stopped.")
+        time.sleep(0.5)
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except OSError:
+        pass
+    _pid_path().unlink(missing_ok=True)
+    return CommandResult(True, "Minecraft was force-stopped after waiting 20 seconds.")
+
 
 def wait_for_state(running: bool, timeout: int = 30) -> bool:
     end = time.monotonic() + timeout
@@ -35,32 +125,30 @@ def wait_for_state(running: bool, timeout: int = 30) -> bool:
         time.sleep(0.5)
     return False
 
+
 def start() -> CommandResult:
     if is_running():
         return CommandResult(True, "Minecraft is already running.")
+    if DEV_MODE:
+        return _dev_start()
     result = _service("start")
     if result.ok and not wait_for_state(True):
         return CommandResult(False, stderr="The service command succeeded, but Minecraft did not become active within 30 seconds.")
     return result
 
+
 def save_world() -> CommandResult:
     if not is_running():
-        return CommandResult(
-            True,
-            "Server is offline; no live world save was needed.",
-        )
+        return CommandResult(True, "Server is offline; no live world save was needed.")
+    result = rcon.send("save-all flush")
+    if not result.ok:
+        # During local development RCON may not be ready yet. Stopping should
+        # still work instead of turning this into an HTTP 500.
+        if DEV_MODE:
+            return CommandResult(True, "RCON was unavailable; continuing with local shutdown.")
+        return CommandResult(False, stderr=f"RCON save failed: {result.message}")
+    return CommandResult(True, result.stdout or "World save requested.")
 
-    try:
-        response = rcon.command("save-all flush")
-        return CommandResult(
-            True,
-            response or "World save requested.",
-        )
-    except Exception as exc:
-        return CommandResult(
-            False,
-            stderr=f"RCON save failed: {exc}",
-        )
 
 def stop() -> CommandResult:
     if not is_running():
@@ -68,12 +156,20 @@ def stop() -> CommandResult:
     saved = save_world()
     if not saved.ok:
         return saved
+    if DEV_MODE:
+        return _dev_stop()
     result = _service("stop")
     if result.ok and not wait_for_state(False):
         return CommandResult(False, stderr="Minecraft did not stop within 30 seconds.")
     return result
 
+
 def restart() -> CommandResult:
+    if DEV_MODE:
+        stopped = stop()
+        if not stopped.ok:
+            return stopped
+        return start()
     if is_running():
         saved = save_world()
         if not saved.ok:
@@ -83,59 +179,74 @@ def restart() -> CommandResult:
         return CommandResult(False, stderr="Minecraft did not become active after restart.")
     return result
 
+
 def status_text() -> str:
     return "Online" if is_running() else "Offline"
+
 
 def player_info() -> tuple[list[str], int] | None:
     if not is_running():
         return None
-
-    players_function = getattr(rcon, "players", None)
-
-    if not callable(players_function):
-        return None
-
     try:
-        return players_function()
+        return rcon.players()
     except Exception:
+        # Status polling must never turn a successful start into HTTP 500.
         return None
+
 
 def player_count_text() -> str:
     info = player_info()
     return f"{len(info[0])}/{info[1]}" if info else ("Offline" if not is_running() else "Unavailable")
 
+
 def version() -> str:
     try:
-        text = SERVER_LOG.read_text(encoding="utf-8", errors="ignore")
+        text = _log_path().read_text(encoding="utf-8", errors="ignore")
     except OSError:
-        return "Unknown"
+        active = servers.active_server()
+        return active.version if active else "Unknown"
     matches = re.findall(r"Starting minecraft server version ([^\s]+)", text, re.I)
-    return matches[-1] if matches else "Unknown"
+    return matches[-1] if matches else ((servers.active_server().version) if servers.active_server() else "Unknown")
+
 
 def uptime() -> str:
     if not is_running():
         return "Offline"
-    result = run(["systemctl", "show", SERVICE_NAME, "--property=ActiveEnterTimestampMonotonic", "--value"])
-    try:
-        start_us = int(result.stdout)
-        now = float(Path("/proc/uptime").read_text().split()[0])
-        total = max(0, int(now - start_us / 1_000_000))
-    except (ValueError, OSError, IndexError):
-        return "Unknown"
+    if DEV_MODE:
+        pid = _read_pid()
+        if not pid:
+            return "Unknown"
+        try:
+            age = time.time() - Path(f"/proc/{pid}").stat().st_ctime
+            total = max(0, int(age))
+        except OSError:
+            return "Unknown"
+    else:
+        result = run(["systemctl", "show", SERVICE_NAME, "--property=ActiveEnterTimestampMonotonic", "--value"])
+        try:
+            start_us = int(result.stdout)
+            now = float(Path("/proc/uptime").read_text().split()[0])
+            total = max(0, int(now - start_us / 1_000_000))
+        except (ValueError, OSError, IndexError):
+            return "Unknown"
     d, rem = divmod(total, 86400); h, rem = divmod(rem, 3600); m, s = divmod(rem, 60)
     return f"{d}d {h}h {m}m" if d else (f"{h}h {m}m" if h else f"{m}m {s}s")
 
+
 def recent_logs(count: int = 20) -> list[str]:
-    try:
-        lines = SERVER_LOG.read_text(encoding="utf-8", errors="ignore").splitlines()
-        return [x.strip() for x in lines[-count:] if x.strip()] or ["No recent server activity."]
-    except OSError as exc:
-        return [f"Unable to read log: {exc}"]
+    for path in (_log_path(), _active_dir() / "logs" / "minebox-console.log"):
+        try:
+            lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            if lines:
+                return [x.strip() for x in lines[-count:] if x.strip()]
+        except OSError:
+            continue
+    return ["No recent server activity."]
 
 def read_properties() -> tuple[dict[str, str], str | None]:
     props: dict[str, str] = {}
     try:
-        for raw in SERVER_PROPERTIES.read_text(encoding="utf-8").splitlines():
+        for raw in _properties_path().read_text(encoding="utf-8").splitlines():
             line = raw.strip()
             if line and not line.startswith("#") and "=" in line:
                 key, value = line.split("=", 1)
@@ -146,7 +257,7 @@ def read_properties() -> tuple[dict[str, str], str | None]:
 
 def update_property(key: str, value: str) -> CommandResult:
     try:
-        lines = SERVER_PROPERTIES.read_text(encoding="utf-8").splitlines()
+        lines = _properties_path().read_text(encoding="utf-8").splitlines()
         found = False
         output = []
         for line in lines:
@@ -156,400 +267,188 @@ def update_property(key: str, value: str) -> CommandResult:
                 output.append(line)
         if not found:
             output.append(f"{key}={value}")
-        SERVER_PROPERTIES.write_text("\n".join(output) + "\n", encoding="utf-8")
+        _properties_path().write_text("\n".join(output) + "\n", encoding="utf-8")
         return CommandResult(True, f"{key} updated. Restart Minecraft to apply it.")
     except OSError as exc:
         return CommandResult(False, stderr=str(exc))
 
+# Dashboard server-settings support.
+# These helpers intentionally live in this service so both the API and the
+# built MineBox image use the same server.properties implementation.
+_SETTING_RULES = {
+    "motd": (str, None, None),
+    "max-players": (int, 1, 1000),
+    "gamemode": (str, None, None),
+    "difficulty": (str, None, None),
+    "view-distance": (int, 2, 32),
+    "simulation-distance": (int, 2, 32),
+    "server-port": (int, 1024, 65535),
+    "player-idle-timeout": (int, 0, 1440),
+    "online-mode": (bool, None, None),
+    "pvp": (bool, None, None),
+    "white-list": (bool, None, None),
+    "allow-flight": (bool, None, None),
+    "enable-command-block": (bool, None, None),
+    "force-gamemode": (bool, None, None),
+}
 
-# MineBox Server Settings API v1
-
-_SERVER_SETTING_RULES = {
-    "motd": {
-        "type": "string",
-        "minimum_length": 1,
-        "maximum_length": 120,
-    },
-    "max-players": {
-        "type": "integer",
-        "minimum": 1,
-        "maximum": 1000,
-    },
-    "difficulty": {
-        "type": "choice",
-        "choices": {
-            "0": "peaceful",
-            "1": "easy",
-            "2": "normal",
-            "3": "hard",
-            "peaceful": "peaceful",
-            "easy": "easy",
-            "normal": "normal",
-            "hard": "hard",
-        },
-        "stored_values": {
-            "peaceful": "0",
-            "easy": "1",
-            "normal": "2",
-            "hard": "3",
-        },
-    },
-    "gamemode": {
-        "type": "choice",
-        "choices": {
-            "0": "survival",
-            "1": "creative",
-            "2": "adventure",
-            "3": "spectator",
-            "survival": "survival",
-            "creative": "creative",
-            "adventure": "adventure",
-            "spectator": "spectator",
-        },
-        "stored_values": {
-            "survival": "0",
-            "creative": "1",
-            "adventure": "2",
-            "spectator": "3",
-        },
-    },
-    "online-mode": {
-        "type": "boolean",
-    },
-    "pvp": {
-        "type": "boolean",
-    },
-    "white-list": {
-        "type": "boolean",
-    },
-    "allow-flight": {
-        "type": "boolean",
-    },
-    "enable-command-block": {
-        "type": "boolean",
-    },
-    "force-gamemode": {
-        "type": "boolean",
-    },
-    "view-distance": {
-        "type": "integer",
-        "minimum": 2,
-        "maximum": 32,
-    },
-    "simulation-distance": {
-        "type": "integer",
-        "minimum": 2,
-        "maximum": 32,
-    },
-    "server-port": {
-        "type": "integer",
-        "minimum": 1024,
-        "maximum": 65535,
-    },
-    "player-idle-timeout": {
-        "type": "integer",
-        "minimum": 0,
-        "maximum": 1440,
-    },
+_ALLOWED_VALUES = {
+    "gamemode": {"survival", "creative", "adventure", "spectator"},
+    "difficulty": {"peaceful", "easy", "normal", "hard"},
 }
 
 
-def _setting_boolean(value):
-    if isinstance(value, bool):
-        return value
-
-    normalized = str(value).strip().lower()
-
-    if normalized in {"true", "1", "yes", "on"}:
-        return True
-
-    if normalized in {"false", "0", "no", "off"}:
-        return False
-
-    raise ValueError("must be true or false")
-
-
-def _display_setting_value(key: str, value: str):
-    rule = _SERVER_SETTING_RULES[key]
-    setting_type = rule["type"]
-
-    if setting_type == "boolean":
+def _to_dashboard_value(key: str, raw: str):
+    expected_type = _SETTING_RULES[key][0]
+    if expected_type is bool:
+        return raw.strip().lower() == "true"
+    if expected_type is int:
         try:
-            return _setting_boolean(value)
+            return int(raw)
         except ValueError:
-            return False
-
-    if setting_type == "integer":
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            return rule.get("minimum", 0)
-
-    if setting_type == "choice":
-        normalized = str(value).strip().lower()
-        return rule["choices"].get(normalized, normalized)
-
-    return str(value)
-
-
-def _validate_setting_value(key: str, value):
-    rule = _SERVER_SETTING_RULES[key]
-    setting_type = rule["type"]
-
-    if setting_type == "boolean":
-        parsed = _setting_boolean(value)
-        return "true" if parsed else "false"
-
-    if setting_type == "integer":
-        if isinstance(value, bool):
-            raise ValueError("must be a whole number")
-
-        try:
-            parsed = int(value)
-        except (TypeError, ValueError):
-            raise ValueError("must be a whole number")
-
-        minimum = rule["minimum"]
-        maximum = rule["maximum"]
-
-        if parsed < minimum or parsed > maximum:
-            raise ValueError(
-                f"must be between {minimum} and {maximum}"
-            )
-
-        return str(parsed)
-
-    if setting_type == "choice":
-        normalized = str(value).strip().lower()
-        selected = rule["choices"].get(normalized)
-
-        if selected is None:
-            valid = sorted(set(rule["choices"].values()))
-            raise ValueError(
-                "must be one of: " + ", ".join(valid)
-            )
-
-        return rule["stored_values"].get(selected, selected)
-
-    normalized = str(value).strip()
-
-    minimum_length = rule.get("minimum_length", 0)
-    maximum_length = rule.get("maximum_length", 1000)
-
-    if len(normalized) < minimum_length:
-        raise ValueError(
-            f"must contain at least {minimum_length} character"
-        )
-
-    if len(normalized) > maximum_length:
-        raise ValueError(
-            f"must not exceed {maximum_length} characters"
-        )
-
-    if "\n" in normalized or "\r" in normalized:
-        raise ValueError("must be entered on one line")
-
-    return normalized
+            return 0
+    return raw
 
 
 def read_server_settings() -> dict:
     properties, error = read_properties()
-
     if error:
         return {
             "ok": False,
-            "message": (
-                "MineBox could not read server.properties: "
-                + error
-            ),
-            "settings": {},
+            "message": f"Could not read server.properties: {error}",
         }
 
     settings = {}
-
-    for key in _SERVER_SETTING_RULES:
+    for key in _SETTING_RULES:
         if key in properties:
-            settings[key] = _display_setting_value(
-                key,
-                properties[key],
-            )
+            settings[key] = _to_dashboard_value(key, properties[key])
 
     return {
         "ok": True,
         "settings": settings,
-        "restart_required": False,
-        "server_running": is_running(),
+        "message": "Server settings loaded.",
     }
 
 
-def save_server_settings(payload) -> dict:
-    if not isinstance(payload, dict):
-        return {
-            "ok": False,
-            "status_code": 400,
-            "message": "The settings request must be an object.",
-            "errors": {
-                "settings": "Invalid settings request."
-            },
-        }
+def _validate_setting(key: str, value):
+    expected_type, minimum, maximum = _SETTING_RULES[key]
 
-    submitted = payload.get("settings", payload)
+    if expected_type is bool:
+        if not isinstance(value, bool):
+            return None, "Must be true or false."
+        return "true" if value else "false", None
 
-    if not isinstance(submitted, dict):
-        return {
-            "ok": False,
-            "status_code": 400,
-            "message": "The settings field must be an object.",
-            "errors": {
-                "settings": "Invalid settings request."
-            },
-        }
-
-    if not submitted:
-        return {
-            "ok": False,
-            "status_code": 400,
-            "message": "No settings were provided.",
-            "errors": {
-                "settings": "Choose at least one setting to save."
-            },
-        }
-
-    unknown = sorted(
-        key
-        for key in submitted
-        if key not in _SERVER_SETTING_RULES
-    )
-
-    if unknown:
-        return {
-            "ok": False,
-            "status_code": 400,
-            "message": "Unsupported settings were provided.",
-            "errors": {
-                key: "This setting is not supported by MineBox."
-                for key in unknown
-            },
-        }
-
-    validated = {}
-    errors = {}
-
-    for key, value in submitted.items():
+    if expected_type is int:
+        if isinstance(value, bool):
+            return None, "Must be a number."
         try:
-            validated[key] = _validate_setting_value(
-                key,
-                value,
-            )
-        except ValueError as exc:
-            errors[key] = str(exc)
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None, "Must be a number."
+        if minimum is not None and parsed < minimum:
+            return None, f"Must be at least {minimum}."
+        if maximum is not None and parsed > maximum:
+            return None, f"Must be no more than {maximum}."
+        return str(parsed), None
+
+    parsed = str(value).strip()
+    if key == "motd" and not parsed:
+        return None, "Server name cannot be empty."
+    if key == "motd" and len(parsed) > 120:
+        return None, "Server name must be 120 characters or fewer."
+    if key in _ALLOWED_VALUES and parsed not in _ALLOWED_VALUES[key]:
+        return None, "Choose one of the available values."
+    return parsed, None
+
+
+def save_server_settings(payload: dict) -> dict:
+    if not isinstance(payload, dict) or not isinstance(payload.get("settings"), dict):
+        return {
+            "ok": False,
+            "status_code": 400,
+            "message": "A settings object is required.",
+            "errors": {},
+        }
+
+    requested = payload["settings"]
+    errors = {}
+    validated = {}
+
+    for key, value in requested.items():
+        if key not in _SETTING_RULES:
+            continue
+        normalized, error = _validate_setting(key, value)
+        if error:
+            errors[key] = error
+        else:
+            validated[key] = normalized
 
     if errors:
         return {
             "ok": False,
             "status_code": 422,
-            "message": "Some settings are invalid.",
+            "message": "One or more settings are invalid.",
             "errors": errors,
         }
 
-    try:
-        original_text = SERVER_PROPERTIES.read_text(
-            encoding="utf-8"
-        )
-    except OSError as exc:
+    if not validated:
         return {
             "ok": False,
-            "status_code": 500,
-            "message": (
-                "MineBox could not read server.properties: "
-                + str(exc)
-            ),
+            "status_code": 400,
+            "message": "No supported server settings were supplied.",
             "errors": {},
         }
 
-    import shutil
-    from datetime import datetime
-
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-
-    backup_path = SERVER_PROPERTIES.with_name(
-        f"{SERVER_PROPERTIES.name}.minebox-{timestamp}.bak"
-    )
-
-    try:
-        shutil.copy2(
-            SERVER_PROPERTIES,
-            backup_path,
-        )
-    except OSError as exc:
+    properties, error = read_properties()
+    if error:
         return {
             "ok": False,
             "status_code": 500,
-            "message": (
-                "MineBox could not create a settings backup: "
-                + str(exc)
-            ),
+            "message": f"Could not read server.properties: {error}",
             "errors": {},
         }
 
-    output = []
-    updated_keys = set()
-
-    for line in original_text.splitlines():
-        if (
-            line
-            and not line.startswith("#")
-            and "=" in line
-        ):
-            key = line.split("=", 1)[0]
-
-            if key in validated:
-                output.append(f"{key}={validated[key]}")
-                updated_keys.add(key)
-                continue
-
-        output.append(line)
-
-    for key, value in validated.items():
-        if key not in updated_keys:
-            output.append(f"{key}={value}")
+    properties.update(validated)
 
     try:
-        SERVER_PROPERTIES.write_text(
-            "\n".join(output) + "\n",
+        existing_lines = _properties_path().read_text(
+            encoding="utf-8",
+            errors="ignore",
+        ).splitlines()
+
+        output = []
+        written = set()
+        for line in existing_lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith("#") and "=" in line:
+                key = line.split("=", 1)[0]
+                if key in validated:
+                    output.append(f"{key}={validated[key]}")
+                    written.add(key)
+                    continue
+            output.append(line)
+
+        for key, value in validated.items():
+            if key not in written:
+                output.append(f"{key}={value}")
+
+        _properties_path().write_text(
+            "\n".join(output).rstrip() + "\n",
             encoding="utf-8",
         )
     except OSError as exc:
-        try:
-            shutil.copy2(
-                backup_path,
-                SERVER_PROPERTIES,
-            )
-        except OSError:
-            pass
-
         return {
             "ok": False,
             "status_code": 500,
-            "message": (
-                "MineBox could not save server.properties: "
-                + str(exc)
-            ),
+            "message": f"Could not save server.properties: {exc}",
             "errors": {},
         }
 
-    current = read_server_settings()
-
     return {
         "ok": True,
-        "message": (
-            "Server settings saved. Restart Minecraft "
-            "to apply the changes."
-        ),
-        "settings": current.get("settings", {}),
-        "changed": sorted(validated),
-        "restart_required": True,
-        "server_running": is_running(),
-        "backup_file": backup_path.name,
+        "settings": {
+            key: _to_dashboard_value(key, value)
+            for key, value in validated.items()
+        },
+        "message": "Settings saved. Restart Minecraft to apply them.",
     }
-

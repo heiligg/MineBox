@@ -138,3 +138,4 @@ def create_server(request: CreateServerRequest):
             status_code=500,
             detail=f"Could not create the server files: {error}",
         ) from error
+
