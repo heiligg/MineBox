@@ -4,6 +4,11 @@ getent group minebox >/dev/null || groupadd --system minebox
 id minecraft >/dev/null 2>&1 || useradd --system --home /opt/minecraft --shell /usr/sbin/nologin --gid minebox minecraft
 usermod -aG minebox minebox
 
+hostnamectl set-hostname minebox
+install -m 0755 /opt/minebox/scripts/set_hostname.py /usr/local/sbin/minebox-set-hostname
+mkdir -p /etc/avahi/services
+install -m 0644 /opt/minebox/services/avahi/minebox.service /etc/avahi/services/minebox.service
+
 chown -R minebox:minebox /opt/minebox
 chmod -R u=rwX,g=rX,o= /opt/minebox
 find /opt/minebox -type f -name '*.sh' -exec chmod +x {} +
@@ -22,7 +27,7 @@ install -m 0644 /opt/minebox/services/minebox-maintenance.timer /etc/systemd/sys
 install -m 0644 /opt/minebox/services/minebox-network.service /etc/systemd/system/minebox-network.service
 
 cat >/etc/sudoers.d/minebox <<'SUDOERS'
-minebox ALL=(root) NOPASSWD: /usr/bin/systemctl start minecraft.service, /usr/bin/systemctl stop minecraft.service, /usr/bin/systemctl restart minecraft.service, /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot
+minebox ALL=(root) NOPASSWD: /usr/bin/systemctl start minecraft.service, /usr/bin/systemctl stop minecraft.service, /usr/bin/systemctl restart minecraft.service, /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot, /usr/local/sbin/minebox-set-hostname *
 SUDOERS
 chmod 0440 /etc/sudoers.d/minebox
 visudo -cf /etc/sudoers.d/minebox
@@ -32,3 +37,4 @@ chown -R minebox:minebox /var/lib/minebox /var/log/minebox
 
 systemctl enable minebox-maintenance.timer
 systemctl enable minebox-network.service
+systemctl enable avahi-daemon.service

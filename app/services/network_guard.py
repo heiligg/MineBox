@@ -208,39 +208,46 @@ def start_setup_hotspot() -> None:
 
 
 def check_network() -> None:
-    """
-    Perform one network-management check.
-    """
+    """Keep the MineBox hotspot available and share any usable uplink."""
 
     if not network.networkmanager_available():
-        LOGGER.warning(
-            "NetworkManager is not ready."
-        )
+        LOGGER.warning("NetworkManager is not ready.")
         return
 
-    interface = network.wifi_interface()
+    concurrency = network.wifi_hotspot_concurrency()
+    adapter_count = int(concurrency.get("adapter_count", 0))
 
-    if interface is None:
-        LOGGER.info(
-            "No Wi-Fi adapter detected; "
-            "no hotspot changes will be made."
-        )
-        return
-
-    if ethernet_is_connected():
-        stop_unneeded_hotspot(
-            "Ethernet is connected"
-        )
+    if adapter_count == 0:
+        LOGGER.info("No Wi-Fi adapter detected; the hotspot cannot be started.")
         return
 
     current_status = network.status()
+    ethernet_connected = ethernet_is_connected()
+    wifi_connected = regular_wifi_is_connected(current_status)
 
-    if regular_wifi_is_connected(current_status):
-        stop_unneeded_hotspot(
-            "normal Wi-Fi is connected"
+    # Ethernet plus one Wi-Fi radio is the preferred configuration: the radio
+    # remains an access point and NetworkManager shares Ethernet through it.
+    if ethernet_connected:
+        start_setup_hotspot()
+        return
+
+    # Wi-Fi uplink sharing requires a second radio. With two adapters, one stays
+    # connected upstream and the other broadcasts MineBox.
+    if wifi_connected and adapter_count >= 2:
+        start_setup_hotspot()
+        return
+
+    if wifi_connected and adapter_count < 2:
+        if network.hotspot_is_active():
+            stop_unneeded_hotspot("the only Wi-Fi adapter is being used as the internet uplink")
+        LOGGER.info(
+            "Wi-Fi internet is connected, but a second Wi-Fi adapter is required "
+            "to broadcast the MineBox hotspot at the same time."
         )
         return
 
+    # No internet uplink is available, but the hotspot remains useful for local
+    # dashboard access and LAN Minecraft play.
     start_setup_hotspot()
 
 

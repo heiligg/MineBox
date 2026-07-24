@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import re
 import socket
+from pathlib import Path
 from typing import Any
 
 from services.system import CommandResult, run
@@ -146,6 +148,68 @@ def wifi_interface() -> str | None:
         return devices[0]["device"]
 
     return None
+
+
+def hotspot_interface() -> str | None:
+    """Return the Wi-Fi adapter that should broadcast the MineBox hotspot.
+
+    Prefer an adapter already running the hotspot, then an unused adapter.
+    A Wi-Fi adapter used as the internet uplink is only returned when it is
+    the sole adapter, because most radios cannot be a client and AP reliably
+    at the same time.
+    """
+
+    devices = _wifi_devices()
+
+    for device in devices:
+        if device["connection"] == HOTSPOT_CONNECTION_NAME:
+            return device["device"]
+
+    for device in devices:
+        if device["state"] not in {"connected", "connecting"}:
+            return device["device"]
+
+    if len(devices) == 1:
+        return devices[0]["device"]
+
+    return None
+
+
+def wifi_uplink_interface() -> str | None:
+    """Return the Wi-Fi client adapter, excluding the hotspot adapter."""
+
+    for device in _wifi_devices():
+        if (
+            device["state"] in {"connected", "connecting"}
+            and device["connection"] != HOTSPOT_CONNECTION_NAME
+        ):
+            return device["device"]
+
+    for device in _wifi_devices():
+        if device["connection"] != HOTSPOT_CONNECTION_NAME:
+            return device["device"]
+
+    return None
+
+
+def wifi_hotspot_concurrency() -> dict[str, Any]:
+    """Describe whether Wi-Fi internet and the hotspot can coexist."""
+
+    devices = _wifi_devices()
+    client = next(
+        (d for d in devices if d["state"] == "connected" and d["connection"] != HOTSPOT_CONNECTION_NAME),
+        None,
+    )
+    hotspot = next((d for d in devices if d["connection"] == HOTSPOT_CONNECTION_NAME), None)
+    can_share_wifi = len(devices) >= 2 or client is None
+
+    return {
+        "adapter_count": len(devices),
+        "uplink_interface": client["device"] if client else None,
+        "hotspot_interface": hotspot["device"] if hotspot else hotspot_interface(),
+        "wifi_to_hotspot_supported": can_share_wifi,
+        "requires_second_adapter": bool(client and len(devices) < 2),
+    }
 
 
 def _hostname() -> str:
@@ -346,7 +410,8 @@ def status() -> dict[str, Any]:
     """Return current Ethernet, Wi-Fi, address, and hotspot details."""
     available = networkmanager_available()
     devices = _network_devices() if available else []
-    wifi = next((d for d in devices if d["type"] == "wifi"), None)
+    wifi_devices = [d for d in devices if d["type"] == "wifi"]
+    wifi = wifi_devices[0] if wifi_devices else None
     default_interface = _default_route_interface()
 
     selected = next(
@@ -399,6 +464,14 @@ def status() -> dict[str, Any]:
         "dns": dns,
         "hotspot_active": hotspot_active,
         "hotspot_connection_name": HOTSPOT_CONNECTION_NAME,
+        "hotspot_ip_address": DEFAULT_HOTSPOT_ADDRESS.split("/", 1)[0],
+        "internet_sharing": hotspot_active and bool(default_interface),
+        "internet_source": (
+            "ethernet" if selected and selected["type"] in {"ethernet", "802-3-ethernet"}
+            else "wifi" if selected and selected["type"] == "wifi" and selected["connection"] != HOTSPOT_CONNECTION_NAME
+            else None
+        ),
+        **wifi_hotspot_concurrency(),
     }
 
     if selected and selected["type"] == "wifi":
@@ -416,12 +489,12 @@ def scan_wifi(rescan: bool = True) -> dict[str, Any]:
     Duplicate SSIDs are combined, keeping the strongest signal.
     """
 
-    interface = wifi_interface()
+    interface = wifi_uplink_interface()
 
     if interface is None:
         return {
             "ok": False,
-            "message": "No Wi-Fi adapter was detected.",
+            "message": "No Wi-Fi adapter is available for connecting to another network.",
             "interface": None,
             "networks": [],
         }
@@ -577,12 +650,12 @@ def connect_wifi(
     Open networks may use an empty password.
     """
 
-    interface = wifi_interface()
+    interface = wifi_uplink_interface()
 
     if interface is None:
         return CommandResult(
             False,
-            stderr="No Wi-Fi adapter was detected.",
+            stderr="No Wi-Fi adapter is available for the internet connection.",
             returncode=1,
         )
 
@@ -604,8 +677,11 @@ def connect_wifi(
         else ""
     )
 
-    # Turn off the setup hotspot before trying to join another network.
-    if hotspot_is_active():
+    # Keep the hotspot online when a second Wi-Fi adapter is available.
+    # With only one radio, NetworkManager must stop AP mode before joining Wi-Fi.
+    hotspot_was_active = hotspot_is_active()
+    concurrency = wifi_hotspot_concurrency()
+    if hotspot_was_active and concurrency["adapter_count"] < 2:
         stop_hotspot()
 
     command = [
@@ -648,14 +724,18 @@ def connect_wifi(
             returncode=result.returncode,
         )
 
+    message = f"MineBox connected to {ssid}."
+    if hotspot_was_active and concurrency["adapter_count"] < 2:
+        message += " The hotspot was stopped because one Wi-Fi adapter cannot reliably handle both roles; Ethernet or a second Wi-Fi adapter keeps both active."
+
     return CommandResult(
         True,
-        stdout=f"MineBox connected to {ssid}.",
+        stdout=message,
     )
 
 
 def disconnect_wifi() -> CommandResult:
-    interface = wifi_interface()
+    interface = wifi_uplink_interface()
 
     if interface is None:
         return CommandResult(
@@ -785,6 +865,36 @@ def forget_wifi(connection_name: str) -> CommandResult:
     )
 
 
+
+def set_hostname(hostname: str) -> CommandResult:
+    """Set the appliance hostname used for mDNS (for example minebox.local)."""
+    normalized = hostname.strip().lower()
+    if not re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", normalized):
+        return CommandResult(
+            ok=False,
+            returncode=2,
+            stdout="",
+            stderr=(
+                "Hostname must use lowercase letters, numbers, and hyphens, "
+                "and cannot begin or end with a hyphen."
+            ),
+        )
+
+    helper = Path("/usr/local/sbin/minebox-set-hostname")
+    command = [str(helper), normalized]
+    if os.geteuid() != 0:
+        command[0:0] = ["sudo", "-n"]
+
+    result = run(command)
+    if result.ok:
+        return CommandResult(
+            ok=True,
+            returncode=0,
+            stdout=f"MineBox is now available as {normalized}.local.",
+            stderr="",
+        )
+    return result
+
 def start_hotspot(
     ssid: str = DEFAULT_HOTSPOT_SSID,
     password: str = "",
@@ -795,12 +905,23 @@ def start_hotspot(
     NetworkManager's shared IPv4 mode supplies DHCP and NAT.
     """
 
-    interface = wifi_interface()
+    interface = hotspot_interface()
 
     if interface is None:
         return CommandResult(
             False,
-            stderr="No Wi-Fi adapter was detected.",
+            stderr="No Wi-Fi adapter is available for the hotspot.",
+            returncode=1,
+        )
+
+    concurrency = wifi_hotspot_concurrency()
+    if concurrency["requires_second_adapter"]:
+        return CommandResult(
+            False,
+            stderr=(
+                "MineBox is using its only Wi-Fi adapter for internet. "
+                "Connect Ethernet or add a second Wi-Fi adapter to keep the hotspot and Wi-Fi internet active together."
+            ),
             returncode=1,
         )
 
@@ -883,7 +1004,11 @@ def start_hotspot(
             "modify",
             HOTSPOT_CONNECTION_NAME,
             "connection.autoconnect",
-            "no",
+            "yes",
+            "connection.autoconnect-priority",
+            "50",
+            "ipv4.never-default",
+            "yes",
         ],
         timeout=20,
     )
@@ -916,7 +1041,7 @@ def start_hotspot(
     return CommandResult(
         True,
         stdout=(
-            f"MineBox hotspot {ssid} started. "
+            f"MineBox hotspot {ssid} started with internet sharing enabled. "
             "Open http://192.168.4.1 after connecting."
         ),
     )

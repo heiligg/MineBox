@@ -42,3 +42,14 @@ auth.json
 network.conf
 .minebox-rcon-password
 .minebox-setup-complete
+# MineBox runtime and local environments (preserved outside release updates)
+runtime/
+.venv/
+*.jar
+
+# Transactional updater directories
+*.update/
+*.previous/
+*.failed/
+*.data/
+

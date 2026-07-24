@@ -120,7 +120,7 @@
 
         if (
             service.active_state === "activating" ||
-            updater.state === "updating"
+            ["starting", "staging", "validating", "switching", "restarting"].includes(updater.state)
         ) {
             return "updating";
         }

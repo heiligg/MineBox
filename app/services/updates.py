@@ -2,254 +2,114 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
-import threading
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from config import APP_VERSION
 
-
 APP_DIR = Path(__file__).resolve().parents[1]
 PROJECT_DIR = APP_DIR.parent
-REPOSITORY_DIR = Path(
-    os.environ.get("MINEBOX_REPOSITORY_DIR", str(PROJECT_DIR))
-).expanduser().resolve()
+REPOSITORY_DIR = Path(os.environ.get("MINEBOX_REPOSITORY_DIR", str(PROJECT_DIR))).expanduser().resolve()
 DEV_MODE = os.environ.get("MINEBOX_DEV_MODE", "0") == "1"
-
-# Production images can override these paths. During local development they stay
-# inside the repository so the dashboard does not require root permissions.
-_runtime_dir = REPOSITORY_DIR / "runtime" / "updates"
-UPDATE_STATUS_FILE = Path(
-    os.environ.get(
-        "MINEBOX_UPDATE_STATUS_FILE",
-        str(_runtime_dir / "update-status.json") if DEV_MODE else "/var/lib/minebox/update-status.json",
-    )
-)
-UPDATE_LOG_FILE = Path(
-    os.environ.get(
-        "MINEBOX_UPDATE_LOG_FILE",
-        str(_runtime_dir / "update.log") if DEV_MODE else "/var/log/minebox/update.log",
-    )
-)
-
+RUNTIME_DIR = Path(os.environ.get("MINEBOX_RUNTIME_DIR", str(REPOSITORY_DIR / "runtime") if DEV_MODE else "/var/lib/minebox"))
+UPDATE_STATUS_FILE = Path(os.environ.get("MINEBOX_UPDATE_STATUS_FILE", str(RUNTIME_DIR / "updates" / "update-status.json")))
+UPDATE_LOG_FILE = Path(os.environ.get("MINEBOX_UPDATE_LOG_FILE", str(RUNTIME_DIR / "updates" / "update.log")))
 UPDATE_REMOTE = os.environ.get("MINEBOX_UPDATE_REMOTE", "").strip()
 UPDATE_BRANCH = os.environ.get("MINEBOX_UPDATE_BRANCH", "").strip()
-DEPLOY_KEY = Path(
-    os.environ.get("MINEBOX_UPDATE_DEPLOY_KEY", "/home/minebox/.ssh/minebox_update")
-)
-
-_UPDATE_LOCK = threading.Lock()
-_UPDATE_THREAD: threading.Thread | None = None
-
+UPDATE_CHANNEL = os.environ.get("MINEBOX_UPDATE_CHANNEL", "development" if DEV_MODE else "stable").strip()
+DEPLOY_KEY = Path(os.environ.get("MINEBOX_UPDATE_DEPLOY_KEY", "/home/minebox/.ssh/minebox_update"))
 
 class UpdateError(RuntimeError):
-    """Raised when the MineBox update system cannot complete an operation."""
-
+    pass
 
 def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-
-def _ensure_parent(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-
-def _append_log(message: str) -> None:
-    try:
-        _ensure_parent(UPDATE_LOG_FILE)
-        with UPDATE_LOG_FILE.open("a", encoding="utf-8") as handle:
-            handle.write(f"[{_utc_now()}] {message.rstrip()}\n")
-    except OSError:
-        # Logging must never make an update operation fail.
-        pass
-
-
-def _write_status(state: str, message: str, **extra: Any) -> None:
-    payload = {
-        "state": state,
-        "message": message,
-        "updated_at": _utc_now(),
-        **extra,
-    }
-    try:
-        _ensure_parent(UPDATE_STATUS_FILE)
-        UPDATE_STATUS_FILE.write_text(
-            json.dumps(payload, indent=2) + "\n",
-            encoding="utf-8",
-        )
-    except OSError:
-        pass
-
-
-def _run(
-    command: list[str],
-    *,
-    timeout: int = 120,
-    env: dict[str, str] | None = None,
-    check: bool = True,
-) -> subprocess.CompletedProcess[str]:
-    process_environment = os.environ.copy()
+def _run(command: list[str], *, timeout: int = 120, env: dict[str, str] | None = None, check: bool = True) -> subprocess.CompletedProcess[str]:
+    process_env = os.environ.copy()
     if env:
-        process_environment.update(env)
-
+        process_env.update(env)
     try:
-        result = subprocess.run(
-            command,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            env=process_environment,
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise UpdateError("The update operation timed out.") from exc
-    except OSError as exc:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout, env=process_env)
+    except (OSError, subprocess.TimeoutExpired) as exc:
         raise UpdateError(str(exc)) from exc
-
     if check and result.returncode != 0:
-        detail = result.stderr.strip() or result.stdout.strip() or "The update command failed."
-        raise UpdateError(detail)
-
+        raise UpdateError(result.stderr.strip() or result.stdout.strip() or "The update command failed.")
     return result
 
+def _git(*args: str, timeout: int = 120, env: dict[str, str] | None = None) -> str:
+    return _run(["git", "-C", str(REPOSITORY_DIR), *args], timeout=timeout, env=env).stdout.strip()
 
-def _git(*arguments: str, timeout: int = 120, env: dict[str, str] | None = None) -> str:
-    return _run(
-        ["git", "-C", str(REPOSITORY_DIR), *arguments],
-        timeout=timeout,
-        env=env,
-    ).stdout.strip()
-
+def _git_environment() -> dict[str, str]:
+    if DEPLOY_KEY.exists():
+        return {"GIT_SSH_COMMAND": f"ssh -i {DEPLOY_KEY} -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=accept-new"}
+    return {}
 
 def repository_exists() -> bool:
     return (REPOSITORY_DIR / ".git").exists()
-
 
 def _remote_names() -> list[str]:
     if not repository_exists():
         return []
     try:
-        return [line.strip() for line in _git("remote").splitlines() if line.strip()]
+        return [x for x in _git("remote").splitlines() if x]
     except UpdateError:
         return []
 
-
 def resolved_remote() -> str | None:
     names = _remote_names()
-    if UPDATE_REMOTE and UPDATE_REMOTE in names:
-        return UPDATE_REMOTE
-    if "updates" in names:
-        return "updates"
-    if "origin" in names:
-        return "origin"
+    for name in (UPDATE_REMOTE, "updates", "origin"):
+        if name and name in names:
+            return name
     return names[0] if names else None
 
-
 def _remote_has_branch(remote: str, branch: str) -> bool:
-    if not remote or not branch:
-        return False
-    try:
-        result = _run(
-            [
-                "git",
-                "-C",
-                str(REPOSITORY_DIR),
-                "ls-remote",
-                "--exit-code",
-                "--heads",
-                remote,
-                branch,
-            ],
-            timeout=120,
-            env=_git_environment(),
-            check=False,
-        )
-        return result.returncode == 0 and bool(result.stdout.strip())
-    except UpdateError:
-        return False
-
+    result = _run(["git", "-C", str(REPOSITORY_DIR), "ls-remote", "--exit-code", "--heads", remote, branch], timeout=120, env=_git_environment(), check=False)
+    return result.returncode == 0 and bool(result.stdout.strip())
 
 def resolved_branch() -> str | None:
     remote = resolved_remote()
     if not remote:
         return None
-
-    # An explicit update branch wins, but only when that branch actually exists
-    # on the selected remote. This prevents version labels such as v0.3-alpha
-    # from being treated as Git branches when the repository only publishes main.
-    if UPDATE_BRANCH and _remote_has_branch(remote, UPDATE_BRANCH):
-        return UPDATE_BRANCH
-
-    candidates: list[str] = []
-
-    # Prefer the branch configured as this checkout's upstream.
+    channel_defaults = {"stable": "main", "beta": "beta", "development": "main"}
+    candidates = [UPDATE_BRANCH, channel_defaults.get(UPDATE_CHANNEL, "")]
     try:
         upstream = _git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
-        prefix = f"{remote}/"
-        if upstream.startswith(prefix):
-            candidates.append(upstream[len(prefix):])
+        if upstream.startswith(remote + "/"):
+            candidates.append(upstream.split("/", 1)[1])
     except UpdateError:
         pass
-
-    # Then try the current local branch. It may be a release/version branch that
-    # does not exist remotely, so it still must be verified.
-    try:
-        current = _git("branch", "--show-current")
-        if current:
-            candidates.append(current)
-    except UpdateError:
-        pass
-
-    # Ask Git which branch the remote advertises as its default.
-    try:
-        remote_head = _git("symbolic-ref", "--quiet", "--short", f"refs/remotes/{remote}/HEAD")
-        prefix = f"{remote}/"
-        if remote_head.startswith(prefix):
-            candidates.append(remote_head[len(prefix):])
-    except UpdateError:
-        pass
-
-    # Common defaults are a final fallback for repositories without a locally
-    # cached remote HEAD reference.
     candidates.extend(["main", "master"])
-
     seen: set[str] = set()
-    for candidate in candidates:
-        candidate = candidate.strip()
-        if not candidate or candidate in seen:
-            continue
-        seen.add(candidate)
-        if _remote_has_branch(remote, candidate):
-            return candidate
-
+    for branch in candidates:
+        branch = branch.strip()
+        if branch and branch not in seen:
+            seen.add(branch)
+            if _remote_has_branch(remote, branch):
+                return branch
     return None
 
-
-def _git_environment() -> dict[str, str]:
-    if DEPLOY_KEY.exists():
-        return {
-            "GIT_SSH_COMMAND": (
-                f"ssh -i {DEPLOY_KEY} -o IdentitiesOnly=yes "
-                "-o BatchMode=yes -o StrictHostKeyChecking=accept-new"
-            )
-        }
-    return {}
-
-
-def current_commit() -> str | None:
-    if not repository_exists():
+def repository_url() -> str | None:
+    remote = resolved_remote()
+    if not remote:
         return None
     try:
-        return _git("rev-parse", "HEAD")
+        return _git("remote", "get-url", remote)
     except UpdateError:
         return None
 
+def current_commit() -> str | None:
+    try:
+        return _git("rev-parse", "HEAD") if repository_exists() else None
+    except UpdateError:
+        return None
 
 def latest_commit() -> str | None:
-    remote = resolved_remote()
-    branch = resolved_branch()
+    remote, branch = resolved_remote(), resolved_branch()
     if not remote or not branch:
         return None
     try:
@@ -257,212 +117,95 @@ def latest_commit() -> str | None:
     except UpdateError:
         return None
 
-
 def has_local_changes() -> bool:
-    if not repository_exists():
-        return False
     try:
-        return bool(_git("status", "--porcelain"))
+        return bool(_git("status", "--porcelain", "--untracked-files=no")) if repository_exists() else False
     except UpdateError:
         return False
 
-
-def _short_commit(commit: str | None) -> str | None:
-    return commit[:7] if commit else None
-
-
-def read_updater_status() -> dict[str, Any]:
-    default_status: dict[str, Any] = {
-        "state": "unknown",
-        "message": "No updater status is available yet.",
-        "old_commit": None,
-        "new_commit": None,
-        "updated_at": None,
-        "saved_changes": None,
-    }
+def _read_status() -> dict[str, Any]:
+    default = {"state": "unknown", "message": "No updater status is available yet.", "updated_at": None}
     try:
-        parsed = json.loads(UPDATE_STATUS_FILE.read_text(encoding="utf-8"))
+        value = json.loads(UPDATE_STATUS_FILE.read_text(encoding="utf-8"))
+        return {**default, **value} if isinstance(value, dict) else default
     except (OSError, json.JSONDecodeError):
-        return default_status
-    return {**default_status, **parsed} if isinstance(parsed, dict) else default_status
+        return default
 
-
-def updater_service_state() -> dict[str, Any]:
-    running = _UPDATE_THREAD is not None and _UPDATE_THREAD.is_alive()
-    return {
-        "active_state": "activating" if running else "inactive",
-        "sub_state": "running" if running else "dead",
-        "result": "success",
-    }
-
+def _short(value: str | None) -> str | None:
+    return value[:7] if value else None
 
 def status() -> dict[str, Any]:
-    installed_commit = current_commit()
-    remote_commit = latest_commit()
-    updater = read_updater_status()
-    remote = resolved_remote()
-    branch = resolved_branch()
-
+    current, latest = current_commit(), latest_commit()
+    updater = _read_status()
+    running_states = {"starting", "staging", "validating", "switching", "restarting"}
     return {
-        "ok": True,
-        "version": APP_VERSION,
-        "channel": "development" if DEV_MODE else "stable",
-        "branch": branch,
-        "remote": remote,
-        "current_commit": installed_commit,
-        "current_commit_short": _short_commit(installed_commit),
-        "latest_commit": remote_commit,
-        "latest_commit_short": _short_commit(remote_commit),
-        "update_available": bool(installed_commit and remote_commit and installed_commit != remote_commit),
-        "local_changes": has_local_changes(),
-        "local_changes_policy": "save_and_replace",
-        "repository_available": repository_exists() and remote is not None,
-        "repository_dir": str(REPOSITORY_DIR),
-        "updater": updater,
-        "service": updater_service_state(),
+        "ok": True, "version": APP_VERSION, "channel": UPDATE_CHANNEL,
+        "branch": resolved_branch(), "remote": resolved_remote(),
+        "current_commit": current, "current_commit_short": _short(current),
+        "latest_commit": latest, "latest_commit_short": _short(latest),
+        "update_available": bool(current and latest and current != latest),
+        "local_changes": has_local_changes(), "local_changes_policy": "preserved_release_swap",
+        "repository_available": repository_exists() and repository_url() is not None,
+        "repository_dir": str(REPOSITORY_DIR), "updater": updater,
+        "service": {"active_state": "activating" if updater.get("state") in running_states else "inactive", "sub_state": updater.get("state"), "result": "success"},
     }
-
 
 def check_for_updates() -> dict[str, Any]:
+    remote, branch = resolved_remote(), resolved_branch()
     if not repository_exists():
         raise UpdateError(f"The MineBox Git repository could not be found at {REPOSITORY_DIR}.")
-
-    remote = resolved_remote()
-    branch = resolved_branch()
-    if not remote:
-        raise UpdateError("No Git remote is configured for MineBox updates.")
-    if not branch:
-        raise UpdateError("MineBox could not determine which Git branch to update.")
-
-    _append_log(f"Checking {remote}/{branch} for updates.")
+    if not remote or not branch:
+        raise UpdateError("MineBox could not determine an update remote and branch.")
     _git("fetch", "--prune", remote, branch, timeout=300, env=_git_environment())
     result = status()
-    result["message"] = (
-        "A MineBox update is available."
-        if result["update_available"]
-        else "MineBox is already up to date."
-    )
+    result["message"] = "A MineBox update is available." if result["update_available"] else "MineBox is already up to date."
     return result
 
-
-def _save_local_changes() -> str | None:
-    if not has_local_changes():
-        return None
-
-    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    message = f"MineBox automatic update backup {stamp}"
-    before = _git("stash", "list", "--format=%gd", timeout=30).splitlines()
-    _git("stash", "push", "--include-untracked", "--message", message, timeout=300)
-    after = _git("stash", "list", "--format=%gd", timeout=30).splitlines()
-
-    saved_ref = after[0] if after and after != before else "git stash"
-    _append_log(f"Saved uncommitted changes in {saved_ref} ({message}).")
-    return saved_ref
-
-
-def _perform_update() -> None:
-    old_commit = current_commit()
-    saved_changes: str | None = None
-    remote = resolved_remote()
-    branch = resolved_branch()
-
-    try:
-        if not remote or not branch:
-            raise UpdateError("The update remote or branch is not configured.")
-
-        _write_status("updating", "Preparing the MineBox update.", old_commit=old_commit)
-        _append_log("Starting MineBox update.")
-
-        saved_changes = _save_local_changes()
-        if saved_changes:
-            _write_status(
-                "updating",
-                "Local changes were saved safely. Downloading the update.",
-                old_commit=old_commit,
-                saved_changes=saved_changes,
-            )
-
-        _append_log(f"Fetching {remote}/{branch}.")
-        _git("fetch", "--prune", remote, branch, timeout=600, env=_git_environment())
-
-        target = f"{remote}/{branch}"
-        _append_log(f"Installing {target}.")
-        _git("reset", "--hard", target, timeout=120)
-        _git("clean", "-fd", "--exclude=runtime/", timeout=120)
-
-        new_commit = current_commit()
-        message = "MineBox was updated successfully."
-        if saved_changes:
-            message += f" Previous uncommitted changes were saved in {saved_changes}."
-
-        _write_status(
-            "success",
-            message,
-            old_commit=old_commit,
-            new_commit=new_commit,
-            saved_changes=saved_changes,
-        )
-        _append_log(message)
-    except Exception as exc:  # keep background failures visible in the dashboard
-        message = str(exc) or exc.__class__.__name__
-        _write_status(
-            "failed",
-            message,
-            old_commit=old_commit,
-            new_commit=current_commit(),
-            saved_changes=saved_changes,
-        )
-        _append_log(f"Update failed: {message}")
-    finally:
-        _UPDATE_LOCK.release()
-
-
 def install_update() -> dict[str, Any]:
-    global _UPDATE_THREAD
-
-    if not repository_exists():
-        raise UpdateError(f"The MineBox Git repository could not be found at {REPOSITORY_DIR}.")
-    if not resolved_remote():
-        raise UpdateError("No Git remote is configured for MineBox updates.")
-
-    if not _UPDATE_LOCK.acquire(blocking=False):
-        return {
-            "ok": True,
-            "started": False,
-            "message": "A MineBox update is already running.",
-            "service": updater_service_state(),
-        }
-
-    _UPDATE_THREAD = threading.Thread(
-        target=_perform_update,
-        name="minebox-updater",
-        daemon=True,
-    )
-    _UPDATE_THREAD.start()
-
-    message = "The MineBox update has started."
+    current = status()
+    updater_state = current["updater"].get("state")
+    if updater_state in {"starting", "staging", "validating", "switching", "restarting"}:
+        return {"ok": True, "started": False, "message": "A MineBox update is already running.", "service": current["service"]}
+    url, branch, target = repository_url(), resolved_branch(), latest_commit()
+    if not url or not branch or not target:
+        raise UpdateError("No valid MineBox update source is configured. Check for updates first.")
     if has_local_changes():
-        message += " Uncommitted changes will be saved automatically before installation."
+        raise UpdateError("Tracked source files have local changes. Commit them before installing an update; runtime data is preserved automatically.")
 
-    return {
-        "ok": True,
-        "started": True,
-        "message": message,
-        "service": updater_service_state(),
+    stage = REPOSITORY_DIR.with_name(REPOSITORY_DIR.name + ".update")
+    previous = REPOSITORY_DIR.with_name(REPOSITORY_DIR.name + ".previous")
+    data_root = REPOSITORY_DIR.with_name(REPOSITORY_DIR.name + ".data")
+    helper_source = APP_DIR / "scripts" / "minebox_updater.py"
+    if not helper_source.is_file():
+        raise UpdateError("The detached updater helper is missing.")
+
+    temp_dir = Path(tempfile.mkdtemp(prefix="minebox-updater-"))
+    helper = temp_dir / "minebox_updater.py"
+    payload_file = temp_dir / "payload.json"
+    shutil.copy2(helper_source, helper)
+    payload = {
+        "current_dir": str(REPOSITORY_DIR), "stage_dir": str(stage), "previous_dir": str(previous),
+        "data_root": str(data_root), "status_file": str(UPDATE_STATUS_FILE), "log_file": str(UPDATE_LOG_FILE),
+        "repository_url": url, "branch": branch, "target_commit": target, "old_commit": current_commit(),
+        "parent_pid": os.getpid(), "mode": "development" if DEV_MODE else "production",
+        "restart_command": os.environ.get("MINEBOX_UPDATE_RESTART_COMMAND", ""),
+        "health_url": os.environ.get("MINEBOX_UPDATE_HEALTH_URL", "http://127.0.0.1:8080/api/v1/health"),
+        "git_env": _git_environment(),
     }
-
+    payload_file.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    UPDATE_STATUS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    UPDATE_STATUS_FILE.write_text(json.dumps({"state": "starting", "message": "Starting the detached MineBox updater.", "updated_at": _utc_now(), "old_commit": current_commit(), "new_commit": target}, indent=2) + "\n", encoding="utf-8")
+    log_handle = open(UPDATE_LOG_FILE, "a", encoding="utf-8")
+    subprocess.Popen([os.environ.get("PYTHON", "python3"), str(helper), str(payload_file)], stdin=subprocess.DEVNULL, stdout=log_handle, stderr=subprocess.STDOUT, start_new_session=True, close_fds=True)
+    log_handle.close()
+    return {"ok": True, "started": True, "message": "MineBox is staging the update safely. The dashboard will restart automatically.", "service": {"active_state": "activating", "sub_state": "starting", "result": "success"}}
 
 def read_update_log(lines: int = 100) -> dict[str, Any]:
-    safe_lines = max(1, min(lines, 500))
+    safe = max(1, min(lines, 500))
     try:
         content = UPDATE_LOG_FILE.read_text(encoding="utf-8", errors="replace")
     except FileNotFoundError:
         content = ""
     except OSError as exc:
         raise UpdateError(f"The update log could not be read: {exc}") from exc
-
-    return {
-        "ok": True,
-        "lines": safe_lines,
-        "log": "\n".join(content.splitlines()[-safe_lines:]),
-    }
+    return {"ok": True, "lines": safe, "log": "\n".join(content.splitlines()[-safe:])}

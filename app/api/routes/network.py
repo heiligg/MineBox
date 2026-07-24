@@ -40,6 +40,15 @@ class HotspotStartRequest(BaseModel):
     )
 
 
+class HostnameRequest(BaseModel):
+    hostname: str = Field(
+        default="minebox",
+        min_length=1,
+        max_length=63,
+        pattern=r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$",
+    )
+
+
 class ForgetWifiRequest(BaseModel):
     connection_name: str = Field(
         ...,
@@ -108,7 +117,8 @@ def wifi_connect(
     """
     Connect MineBox to a selected Wi-Fi network.
 
-    The hotspot is stopped automatically before connecting.
+    The hotspot remains active when a second Wi-Fi adapter is available.
+    With one radio, joining Wi-Fi requires stopping the hotspot.
     """
 
     result = network.connect_wifi(
@@ -169,12 +179,21 @@ def forget_wifi(
     return _result_response(result)
 
 
+@router.post("/hostname")
+def hostname_set(request: HostnameRequest) -> dict[str, Any]:
+    """Change the friendly mDNS name used by the dashboard and Minecraft."""
+    result = network.set_hostname(request.hostname)
+    response = _result_response(result)
+    response["network"] = network.status()
+    return response
+
+
 @router.post("/hotspot/start")
 def hotspot_start(
     request: HotspotStartRequest,
 ) -> dict[str, Any]:
     """
-    Start the MineBox setup hotspot.
+    Start the persistent MineBox hotspot with NetworkManager internet sharing.
     """
 
     result = network.start_hotspot(

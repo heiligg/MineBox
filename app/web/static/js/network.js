@@ -15,6 +15,8 @@
     let hotspotStopButton;
     let hotspotSsidInput;
     let hotspotPasswordInput;
+    let hostnameInput;
+    let hostnameSaveButton;
     let requestRunning = false;
     let refreshTimer = null;
 
@@ -672,9 +674,46 @@
 
         savedSection.section.appendChild(savedList);
 
+        const hostnameSection = createSection(
+            "Device name",
+            "Use one friendly .local address for the dashboard and Minecraft on the hotspot or local network."
+        );
+
+        const hostnameForm = document.createElement("form");
+        hostnameForm.className = "network-form";
+
+        const hostnameField = document.createElement("label");
+        hostnameField.className = "network-field";
+
+        const hostnameLabel = document.createElement("span");
+        hostnameLabel.className = "network-field-label";
+        hostnameLabel.textContent = "MineBox name";
+
+        hostnameInput = document.createElement("input");
+        hostnameInput.className = "network-input";
+        hostnameInput.type = "text";
+        hostnameInput.minLength = 1;
+        hostnameInput.maxLength = 63;
+        hostnameInput.pattern = "[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?";
+        hostnameInput.required = true;
+        hostnameInput.placeholder = "minebox";
+        hostnameInput.autocomplete = "off";
+
+        const hostnameHelp = document.createElement("small");
+        hostnameHelp.className = "network-section-description";
+        hostnameHelp.textContent = "Example: minebox gives http://minebox.local:8080 and minebox.local in Minecraft.";
+
+        hostnameSaveButton = createButton("Save Device Name", "primary");
+        hostnameSaveButton.type = "submit";
+
+        hostnameField.append(hostnameLabel, hostnameInput, hostnameHelp);
+        hostnameForm.append(hostnameField, hostnameSaveButton);
+        hostnameForm.addEventListener("submit", saveHostname);
+        hostnameSection.section.appendChild(hostnameForm);
+
         const hotspotSection = createSection(
-            "Emergency setup hotspot",
-            "Create a temporary Wi-Fi network when MineBox cannot connect to your normal network."
+            "MineBox hotspot and internet sharing",
+            "Keep the MineBox hotspot available for local access and share Ethernet or a second Wi-Fi adapter through it."
         );
 
         const hotspotForm = document.createElement("form");
@@ -726,7 +765,7 @@
         );
 
         hotspotStartButton = createButton(
-            "Start Hotspot",
+            "Start / Update Hotspot",
             "warning"
         );
 
@@ -779,6 +818,7 @@
             connectionSection.section,
             wifiSection.section,
             savedSection.section,
+            hostnameSection.section,
             hotspotSection.section
         );
 
@@ -877,6 +917,8 @@
 
         const hotspotActive =
             Boolean(network.hotspot_active);
+        const internetSharing =
+            Boolean(network.internet_sharing);
 
         let connectionText = "Disconnected";
         let connectionClass = "offline";
@@ -890,8 +932,10 @@
                     : "Connected";
             connectionClass = "online";
         } else if (hotspotActive) {
-            connectionText = "Hotspot active";
-            connectionClass = "warning";
+            connectionText = internetSharing
+                ? "Hotspot + internet sharing"
+                : "Hotspot active (local only)";
+            connectionClass = internetSharing ? "online" : "warning";
         } else if (!wifiAvailable) {
             connectionText = "No Wi-Fi adapter";
         }
@@ -911,8 +955,9 @@
 
         setText(
             "network-ip",
-            network.ip_address ||
-                (hotspotActive ? "192.168.4.1" : "Unavailable")
+            hotspotActive
+                ? (network.hotspot_ip_address || "192.168.4.1")
+                : (network.ip_address || "Unavailable")
         );
 
         setText(
@@ -921,6 +966,10 @@
                 network.hostname ||
                 "minebox.local"
         );
+
+        if (hostnameInput && document.activeElement !== hostnameInput) {
+            hostnameInput.value = network.hostname || "minebox";
+        }
 
         setText(
             "network-signal-value",
@@ -959,8 +1008,16 @@
             requestRunning ||
             !hotspotActive;
 
+        const sharingNote = hotspotActive
+            ? (internetSharing
+                ? ` · Internet shared from ${network.internet_source || "uplink"}`
+                : (network.requires_second_adapter
+                    ? " · Second Wi-Fi adapter required for Wi-Fi sharing"
+                    : " · Local access only"))
+            : "";
+
         statusNote.textContent =
-            `Updated · ${new Date().toLocaleTimeString(
+            `Updated${sharingNote} · ${new Date().toLocaleTimeString(
                 [],
                 {
                     hour: "numeric",
@@ -1478,6 +1535,35 @@
         } finally {
             setBusy(false);
             await loadSavedNetworks();
+        }
+    }
+
+    async function saveHostname(event) {
+        event.preventDefault();
+
+        if (requestRunning || !event.currentTarget.checkValidity()) {
+            event.currentTarget.reportValidity();
+            return;
+        }
+
+        const hostname = hostnameInput.value.trim().toLowerCase();
+        setBusy(true);
+        clearMessage();
+        showMessage(`Changing the device name to ${hostname}.local…`, "warning");
+
+        try {
+            const response = await fetch(`${API_BASE}/hostname`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ hostname })
+            });
+            const data = await parseResponse(response);
+            showMessage(data.message || `MineBox is now ${hostname}.local.`, "success");
+        } catch (error) {
+            showMessage(error.message || "MineBox could not change the device name.", "error");
+        } finally {
+            setBusy(false);
+            await refreshEverything(false);
         }
     }
 
