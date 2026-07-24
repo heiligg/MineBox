@@ -12,7 +12,6 @@ import os
 import shutil
 import signal
 import subprocess
-import sys
 import time
 import urllib.request
 from datetime import datetime, timezone
@@ -68,6 +67,18 @@ def safe_remove(path: Path) -> None:
         shutil.rmtree(path)
 
 
+def retire_previous(previous: Path, log_file: Path) -> None:
+    """Remove the prior rollback copy, or move it aside if protected files exist."""
+    if not previous.exists() and not previous.is_symlink():
+        return
+    try:
+        safe_remove(previous)
+    except PermissionError as exc:
+        stale = previous.with_name(previous.name + ".stale-" + datetime.now().strftime("%Y%m%d%H%M%S"))
+        os.replace(previous, stale)
+        log(log_file, f"Could not delete the old rollback copy ({exc}); moved it to {stale}.")
+
+
 def ensure_shared_path(current: Path, stage: Path, data_root: Path, name: str) -> None:
     source = current / name
     shared = data_root / name
@@ -89,6 +100,36 @@ def ensure_shared_path(current: Path, stage: Path, data_root: Path, name: str) -
     stage_target = stage / name
     safe_remove(stage_target)
     stage_target.symlink_to(shared, target_is_directory=True)
+
+
+def prepare_stage_repository(
+    current: Path,
+    stage: Path,
+    repository_url: str,
+    branch: str,
+    target_commit: str | None,
+    git_env: dict[str, str],
+) -> str:
+    """Create a clean staged release while preserving its real update source."""
+    run(["git", "clone", "--no-hardlinks", "--no-checkout", str(current), str(stage)], timeout=180, env=git_env)
+
+    commit = target_commit or branch
+    run(["git", "-C", str(stage), "checkout", "-B", branch, commit], timeout=120, env=git_env)
+    new_commit = run(["git", "-C", str(stage), "rev-parse", "HEAD"], env=git_env).stdout.strip()
+
+    # A local clone normally rewrites origin to the source directory. Restore the
+    # public repository URL and make the installed branch track the fetched commit.
+    run(["git", "-C", str(stage), "remote", "set-url", "origin", repository_url], env=git_env)
+    run(["git", "-C", str(stage), "update-ref", f"refs/remotes/origin/{branch}", new_commit], env=git_env)
+    run(["git", "-C", str(stage), "branch", "--set-upstream-to", f"origin/{branch}", branch], env=git_env)
+
+    # Local build output is ignored by Git and therefore never enters the staged
+    # release. Explicitly reject it in case a future repository accidentally tracks it.
+    build_path = stage / ".build"
+    if build_path.exists() or build_path.is_symlink():
+        safe_remove(build_path)
+
+    return new_commit
 
 
 def wait_for_exit(pid: int, timeout: float = 20.0) -> None:
@@ -176,16 +217,14 @@ def main() -> int:
         status(status_file, "staging", "Preparing the MineBox update.", old_commit=old_commit)
         safe_remove(stage)
 
-        # The API already fetched target_commit before launching this helper.
-        # Clone from the local repository instead of GitHub so the detached
-        # updater never blocks on credentials or downloads the repository twice.
         log(log_file, f"Staging commit {target_commit or branch} from local repository {current} into {stage}.")
-        run(["git", "clone", "--no-hardlinks", "--no-checkout", str(current), str(stage)], timeout=180, env=git_env)
-        if target_commit:
-            run(["git", "-C", str(stage), "checkout", "--detach", target_commit], timeout=120, env=git_env)
-        else:
-            run(["git", "-C", str(stage), "checkout", branch], timeout=120, env=git_env)
-        new_commit = run(["git", "-C", str(stage), "rev-parse", "HEAD"], env=git_env).stdout.strip()
+        new_commit = prepare_stage_repository(current, stage, repository_url, branch, target_commit, git_env)
+
+        if old_commit and new_commit == old_commit:
+            safe_remove(stage)
+            status(status_file, "success", "MineBox is already up to date.", old_commit=old_commit, new_commit=new_commit, rollback_available=previous.exists())
+            log(log_file, f"Skipped update because MineBox is already at {new_commit}.")
+            return 0
 
         status(status_file, "validating", "Validating the prepared release.", old_commit=old_commit, new_commit=new_commit)
         validate_release(stage)
@@ -197,7 +236,7 @@ def main() -> int:
         log(log_file, "Stopping the running MineBox dashboard.")
         wait_for_exit(parent_pid)
 
-        safe_remove(previous)
+        retire_previous(previous, log_file)
         os.replace(current, previous)
         os.replace(stage, current)
         swapped = True
