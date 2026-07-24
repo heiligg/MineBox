@@ -168,19 +168,26 @@ def main() -> int:
     health_url = cfg.get("health_url", "http://127.0.0.1:8080/api/v1/health")
     git_env = os.environ.copy()
     git_env.update(cfg.get("git_env", {}))
+    git_env.setdefault("GIT_TERMINAL_PROMPT", "0")
     old_commit = cfg.get("old_commit")
     swapped = False
 
     try:
-        status(status_file, "staging", "Downloading the MineBox update.", old_commit=old_commit)
-        log(log_file, f"Cloning {repository_url} branch {branch} into {stage}.")
+        status(status_file, "staging", "Preparing the MineBox update.", old_commit=old_commit)
         safe_remove(stage)
-        run(["git", "clone", "--no-tags", "--single-branch", "--branch", branch, repository_url, str(stage)], env=git_env)
+
+        # The API already fetched target_commit before launching this helper.
+        # Clone from the local repository instead of GitHub so the detached
+        # updater never blocks on credentials or downloads the repository twice.
+        log(log_file, f"Staging commit {target_commit or branch} from local repository {current} into {stage}.")
+        run(["git", "clone", "--no-hardlinks", "--no-checkout", str(current), str(stage)], timeout=180, env=git_env)
         if target_commit:
-            run(["git", "-C", str(stage), "checkout", "--detach", target_commit], env=git_env)
+            run(["git", "-C", str(stage), "checkout", "--detach", target_commit], timeout=120, env=git_env)
+        else:
+            run(["git", "-C", str(stage), "checkout", branch], timeout=120, env=git_env)
         new_commit = run(["git", "-C", str(stage), "rev-parse", "HEAD"], env=git_env).stdout.strip()
 
-        status(status_file, "validating", "Validating the downloaded release.", old_commit=old_commit, new_commit=new_commit)
+        status(status_file, "validating", "Validating the prepared release.", old_commit=old_commit, new_commit=new_commit)
         validate_release(stage)
         ensure_shared_path(current, stage, data_root, "runtime")
         if (current / ".venv").exists() or (data_root / ".venv").exists():
