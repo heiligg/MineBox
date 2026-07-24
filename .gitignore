@@ -53,3 +53,17 @@ runtime/
 *.failed/
 *.data/
 
+
+# Local MineBox runtime/build data
+.venv
+.venv/
+runtime
+runtime/
+.build
+.build/
+*.img
+*.img.xz
+*.iso
+*.vdi
+*.vmdk
+*.qcow2
