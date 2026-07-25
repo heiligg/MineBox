@@ -17,10 +17,12 @@ systemctl unmask hostapd.service
 systemctl enable systemd-networkd.service
 systemctl enable hostapd.service
 systemctl enable dnsmasq.service
+systemctl enable nftables.service
 systemctl enable ssh.service
 
-# NetworkManager may still manage Ethernet, but wlan0 belongs exclusively to
-# systemd-networkd + hostapd. Reload both managers after installing config.
+# NetworkManager may still manage Ethernet or an additional Wi-Fi adapter, but
+# wlan0 belongs exclusively to systemd-networkd + hostapd. Any working default
+# route on another interface can be shared with hotspot clients through nftables.
 systemctl enable NetworkManager.service >/dev/null 2>&1 || true
 
 mkdir -p /etc/systemd/system/hostapd.service.d
@@ -42,5 +44,8 @@ cat >/etc/systemd/system/dnsmasq.service.d/minebox.conf <<'CONF'
 After=systemd-networkd.service hostapd.service
 Wants=systemd-networkd.service
 CONF
+
+# Load routing sysctls during image creation as well as on every real boot.
+sysctl --system >/dev/null 2>&1 || true
 
 systemctl daemon-reload
