@@ -12,6 +12,8 @@ required_nonempty=(
   "pi-gen/stage-minebox/00-install-minebox/00-run-chroot.sh"
   "pi-gen/stage-minebox/01-system-config/00-run.sh"
   "pi-gen/stage-minebox/01-system-config/00-run-chroot.sh"
+  "pi-gen/stage-minebox/01-system-config/files/minebox-ui.service"
+  "pi-gen/stage-minebox/01-system-config/files/minebox-firstboot.service"
   "pi-gen/stage-minebox/02-dedicated-hotspot/00-packages"
   "pi-gen/stage-minebox/02-dedicated-hotspot/01-run.sh"
   "pi-gen/stage-minebox/02-dedicated-hotspot/02-run-chroot.sh"
@@ -47,6 +49,14 @@ grep -Fqx 'channel=6' "$ROOT_DIR/pi-gen/stage-minebox/02-dedicated-hotspot/files
 grep -Fqx 'wpa=2' "$ROOT_DIR/pi-gen/stage-minebox/02-dedicated-hotspot/files/hostapd.conf"
 grep -Fqx 'rsn_pairwise=CCMP' "$ROOT_DIR/pi-gen/stage-minebox/02-dedicated-hotspot/files/hostapd.conf"
 grep -Fq '192.168.4.1/24' "$ROOT_DIR/pi-gen/stage-minebox/02-dedicated-hotspot/files/20-minebox-wlan0.network"
+grep -Fqx 'unmanaged-devices=interface-name:wlan0' "$ROOT_DIR/pi-gen/stage-minebox/02-dedicated-hotspot/files/10-minebox-unmanaged.conf"
+grep -Fqx 'bind-dynamic' "$ROOT_DIR/pi-gen/stage-minebox/02-dedicated-hotspot/files/dnsmasq-minebox.conf"
+
+# The dashboard and first-boot setup must not wait on network-online. The local
+# appliance UI should come up even if the hotspot or upstream network is delayed.
+! grep -Fq 'network-online.target' "$ROOT_DIR/pi-gen/stage-minebox/01-system-config/files/minebox-ui.service"
+! grep -Fq 'network-online.target' "$ROOT_DIR/pi-gen/stage-minebox/01-system-config/files/minebox-firstboot.service"
+grep -Fqx 'ExecStart=/usr/bin/python3 /opt/minebox/main.py' "$ROOT_DIR/pi-gen/stage-minebox/01-system-config/files/minebox-ui.service"
 
 python3 -m compileall -q "$ROOT_DIR/app"
 find "$ROOT_DIR/app" -type d -name __pycache__ -prune -exec rm -rf {} +
