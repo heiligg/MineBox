@@ -14,6 +14,8 @@ PUBLIC_PATHS = {
     "/auth/login",
     "/auth/setup",
     "/api/v1/auth/status",
+    "/setup",
+    "/servers",
     "/health",
     "/api/v1/health",
     "/favicon.ico",
@@ -33,7 +35,9 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             or path.startswith("/static/")
             or path.startswith("/docs")
             or path.startswith("/redoc")
+            or path.startswith("/api/v1/setup")
             or path == "/openapi.json"
+            or path == "/api/v1/openapi.json"
         )
 
         if is_public:

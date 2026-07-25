@@ -11,7 +11,7 @@ from services import downloads, installer, servers
 
 router = APIRouter(prefix="/api/v1/setup", tags=["setup"])
 
-LEGACY_MINECRAFT_DIR = Path("/opt/minecraft")
+LEGACY_MINECRAFT_DIR = servers.MINECRAFT_ROOT
 LEGACY_SERVER_JAR = LEGACY_MINECRAFT_DIR / "server.jar"
 LEGACY_SERVER_PROPERTIES = LEGACY_MINECRAFT_DIR / "server.properties"
 SETUP_MARKER = servers.METADATA_DIR / ".minebox-setup-complete"

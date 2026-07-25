@@ -112,7 +112,7 @@ class MineBoxApp:
             if float(s["cpu"]) >= 90: warnings.append("WARNING: CPU usage is high")
             if float(s["memory"]) >= 90: warnings.append("WARNING: Memory usage is high")
             if float(s["disk"]) >= 90: warnings.append("WARNING: Disk is almost full")
-            last_backup = backups.list_backups()
+            last_backup = backups.legacy_list_backups()
             lines.insert(5, f"Last Backup:     {last_backup[0].label if last_backup else 'None'}")
             if diagnostics.log_has_recent_error(): warnings.append("WARNING: Recent server errors detected")
             for line in lines + ([""] + warnings if warnings else []):
@@ -283,10 +283,10 @@ class MineBoxApp:
         if self.confirm("Prune Backups?", [f"Keep newest {self.settings.get('backup_retention',10)} backup(s)."], "Prune"):
             self.result("Backups", backups.prune())
     def backup_info(self):
-        items=backups.list_backups(); total=sum(x.size for x in items)
-        self.message("Backup Information", [f"Backup count: {len(items)}", f"Total size: {diagnostics.human_size(total)}", f"Retention: {self.settings.get('backup_retention',10)}", f"Location: {backups.BACKUP_DIR}"])
+        items=backups.legacy_list_backups(); total=sum(x.size for x in items)
+        self.message("Backup Information", [f"Backup count: {len(items)}", f"Total size: {diagnostics.human_size(total)}", f"Retention: {self.settings.get('backup_retention',10)}", f"Location: {backups._backup_dir()}"])
     def choose_backup(self,title:str):
-        choices=backups.list_backups(); selected={"value":None}
+        choices=backups.legacy_list_backups(); selected={"value":None}
         items=[]
         for backup in choices: items.append((backup.label, lambda b=backup:(selected.__setitem__('value',b))))
         items.append(("Back",None))

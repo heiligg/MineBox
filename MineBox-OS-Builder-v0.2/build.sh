@@ -132,8 +132,13 @@ mkdir -p "$CUSTOM_STAGE/00-install-minebox/files/minebox"
 rsync -a --delete \
   --exclude='__pycache__' \
   --exclude='*.pyc' \
+  --exclude='*.backup' \
+  --exclude='*.backup-*' \
+  --exclude='*.bak' \
   "$ROOT_DIR/app/" \
   "$CUSTOM_STAGE/00-install-minebox/files/minebox/"
+install -m 0644 "$ROOT_DIR/requirements.txt" \
+  "$CUSTOM_STAGE/00-install-minebox/files/minebox/requirements.txt"
 
 # Catch Python syntax errors after the exact application payload has been staged.
 python3 -m compileall -q "$CUSTOM_STAGE/00-install-minebox/files/minebox"

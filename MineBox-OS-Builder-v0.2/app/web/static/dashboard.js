@@ -1,54 +1,123 @@
 async function api(path, method = "GET") {
-    const response = await fetch(path, { method });
+    try {
+        const response = await fetch(path, { method });
+        const data = await response.json();
 
-    if (!response.ok) {
-        console.error(await response.text());
+        if (!response.ok) {
+            console.error(data);
+            return null;
+        }
+
+        return data;
+    } catch (error) {
+        console.error("MineBox API request failed:", error);
         return null;
     }
-
-    return await response.json();
 }
 
-async function refresh() {
+function setText(id, value) {
+    const element = document.getElementById(id);
+
+    if (element) {
+        element.textContent = value ?? "Unavailable";
+    }
+}
+
+async function refreshStatus() {
     const data = await api("/api/v1/status");
 
-    if (!data) return;
+    if (!data) {
+        setText("dashboard-message", "Unable to contact MineBox API.");
+        return;
+    }
 
-    document.getElementById("status").textContent =
-        data.minecraft.status;
+    setText("dashboard-message", "");
+    setText("status", data.minecraft.status);
+    setText("players", data.minecraft.players);
+    setText("version", data.minecraft.version);
+    setText("uptime", data.minecraft.uptime);
+    setText("cpu", data.system.cpu_percent + "%");
+    setText("ram", data.system.memory_percent + "%");
+}
 
-    document.getElementById("players").textContent =
-        data.minecraft.players;
+async function refreshConsole() {
+    const data = await api("/api/v1/console?lines=150");
+    const consoleElement = document.getElementById("console");
 
-    document.getElementById("version").textContent =
-        data.minecraft.version;
+    if (!consoleElement) {
+        return;
+    }
 
-    document.getElementById("uptime").textContent =
-        data.minecraft.uptime;
+    if (!data) {
+        consoleElement.textContent = "Unable to load console.";
+        return;
+    }
 
-    document.getElementById("cpu").textContent =
-        data.system.cpu_percent + "%";
+    const consoleData = data.console;
 
-    document.getElementById("ram").textContent =
-        data.system.memory_percent + "%";
+    if (!consoleData.available) {
+        consoleElement.textContent =
+            consoleData.message || "Minecraft console is unavailable.";
+        return;
+    }
+
+    const wasNearBottom =
+        consoleElement.scrollHeight -
+            consoleElement.scrollTop -
+            consoleElement.clientHeight <
+        60;
+
+    consoleElement.textContent =
+        consoleData.lines.length > 0
+            ? consoleData.lines.join("\n")
+            : "The Minecraft log is currently empty.";
+
+    if (wasNearBottom) {
+        consoleElement.scrollTop = consoleElement.scrollHeight;
+    }
+}
+
+async function runServerAction(action) {
+    setText("dashboard-message", `${action} request in progress...`);
+
+    const data = await api(
+        `/api/v1/minecraft/${action}`,
+        "POST"
+    );
+
+    if (!data) {
+        setText(
+            "dashboard-message",
+            `Unable to ${action} the Minecraft server.`
+        );
+        return;
+    }
+
+    setText(
+        "dashboard-message",
+        data.message || `${action} request completed.`
+    );
+
+    await refreshStatus();
+    await refreshConsole();
 }
 
 async function startServer() {
-    await api("/api/v1/minecraft/start", "POST");
-    await refresh();
+    await runServerAction("start");
 }
 
 async function stopServer() {
-    await api("/api/v1/minecraft/stop", "POST");
-    await refresh();
+    await runServerAction("stop");
 }
 
 async function restartServer() {
-    await api("/api/v1/minecraft/restart", "POST");
-    await refresh();
+    await runServerAction("restart");
 }
 
 window.onload = () => {
-    refresh();
-    setInterval(refresh, 5000);
+    refreshStatus();
+    refreshConsole();
+
+    setInterval(refreshStatus, 5000);
+    setInterval(refreshConsole, 2000);
 };

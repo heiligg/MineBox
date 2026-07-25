@@ -8,7 +8,8 @@ Type=simple
 User=minebox
 Group=minebox
 WorkingDirectory=/opt/minecraft
-Environment=PYTHONPATH=/opt/minebox/app
+Environment=PYTHONPATH=/opt/minebox
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 -m services.launcher
 Restart=on-failure
 RestartSec=5

@@ -1,22 +1,20 @@
 [Unit]
-Description=Minecraft Server
-ConditionPathExists=/opt/minecraft/server/server.jar
+Description=MineBox active Minecraft server
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=minecraft
+User=minebox
 Group=minebox
-SupplementaryGroups=minebox
-WorkingDirectory=/opt/minecraft/server
-UMask=0002
-EnvironmentFile=-/etc/minebox/minecraft.env
-ExecStart=/usr/bin/java ${JAVA_MIN_RAM} ${JAVA_MAX_RAM} -jar server.jar nogui
-ExecStop=/bin/kill -SIGINT $MAINPID
+WorkingDirectory=/opt/minecraft
+Environment=PYTHONPATH=/opt/minebox
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m services.launcher
 Restart=on-failure
-RestartSec=10
-TimeoutStopSec=120
+RestartSec=5
+TimeoutStopSec=45
+KillSignal=SIGINT
 SuccessExitStatus=0 130 143
 
 [Install]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 from dataclasses import asdict, dataclass
@@ -8,7 +9,14 @@ from pathlib import Path
 from typing import Any
 
 
-MINECRAFT_ROOT = Path("/opt/minecraft")
+def _minecraft_root() -> Path:
+    configured = os.environ.get("MINEBOX_MINECRAFT_ROOT", "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return Path("/opt/minecraft")
+
+
+MINECRAFT_ROOT = _minecraft_root()
 SERVERS_DIR = MINECRAFT_ROOT / "servers"
 METADATA_DIR = MINECRAFT_ROOT / "metadata"
 REGISTRY_FILE = METADATA_DIR / "servers.json"

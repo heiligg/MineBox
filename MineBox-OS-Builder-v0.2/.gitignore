@@ -42,3 +42,7 @@ auth.json
 network.conf
 .minebox-rcon-password
 .minebox-setup-complete
+
+# Local dashboard development data (jars, worlds, secrets)
+runtime/
+.venv/
