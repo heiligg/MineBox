@@ -50,7 +50,20 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            git rsync coreutils xz-utils zip
+            git rsync coreutils xz-utils zip \
+            qemu-user qemu-user-static qemu-user-binfmt binfmt-support
+          command -v qemu-aarch64
+          command -v qemu-aarch64-static || true
+
+      - name: Register ARM emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Validate ARM emulation
+        shell: bash
+        run: |
+          docker run --rm --platform linux/arm64 debian:trixie uname -m
 
       - name: Validate MineBox builder
         shell: bash
