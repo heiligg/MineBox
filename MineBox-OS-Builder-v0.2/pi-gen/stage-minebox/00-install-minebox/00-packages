@@ -1,6 +1,9 @@
 python3
 python3-psutil
 python3-jinja2
+python3-fastapi
+python3-uvicorn
+python3-multipart
 default-jre-headless
 acl
 sudo
