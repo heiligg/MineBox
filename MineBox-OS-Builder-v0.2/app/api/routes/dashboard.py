@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi import APIRouter, Request
 from fastapi.templating import Jinja2Templates
 
@@ -6,12 +8,12 @@ from services import monitoring
 
 router = APIRouter()
 
-templates = Jinja2Templates(directory="app/web/templates")
+APP_ROOT = Path(__file__).resolve().parents[2]
+templates = Jinja2Templates(directory=str(APP_ROOT / "web" / "templates"))
 
 
 @router.get("/")
 def dashboard(request: Request):
-
     sample = monitoring.sample()
 
     return templates.TemplateResponse(
