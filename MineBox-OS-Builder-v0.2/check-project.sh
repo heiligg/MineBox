@@ -6,6 +6,9 @@ required_nonempty=(
   "config/minebox-pi5.conf"
   "app/main.py"
   "app/menu.py"
+  "app/api/server.py"
+  "app/api/routes/dashboard.py"
+  "app/web/templates/index.html"
   "pi-gen/stage-minebox/prerun.sh"
   "pi-gen/stage-minebox/00-install-minebox/00-packages"
   "pi-gen/stage-minebox/00-install-minebox/00-run.sh"
@@ -13,6 +16,7 @@ required_nonempty=(
   "pi-gen/stage-minebox/01-system-config/00-run.sh"
   "pi-gen/stage-minebox/01-system-config/00-run-chroot.sh"
   "pi-gen/stage-minebox/01-system-config/files/minebox-ui.service"
+  "pi-gen/stage-minebox/01-system-config/files/minebox-web.service"
   "pi-gen/stage-minebox/01-system-config/files/minebox-firstboot.service"
   "pi-gen/stage-minebox/02-dedicated-hotspot/00-packages"
   "pi-gen/stage-minebox/02-dedicated-hotspot/01-run.sh"
@@ -58,11 +62,15 @@ grep -Fqx 'net.ipv4.ip_forward=1' "$ROOT_DIR/pi-gen/stage-minebox/02-dedicated-h
 grep -Fq 'masquerade' "$ROOT_DIR/pi-gen/stage-minebox/02-dedicated-hotspot/files/minebox-hotspot.nft"
 grep -Fq 'systemctl enable nftables.service' "$ROOT_DIR/pi-gen/stage-minebox/02-dedicated-hotspot/02-run-chroot.sh"
 
-# The dashboard and first-boot setup must not wait on network-online. The local
-# appliance UI should come up even if the hotspot or upstream network is delayed.
+# Local and browser dashboards must start without waiting on upstream internet.
 ! grep -Fq 'network-online.target' "$ROOT_DIR/pi-gen/stage-minebox/01-system-config/files/minebox-ui.service"
+! grep -Fq 'network-online.target' "$ROOT_DIR/pi-gen/stage-minebox/01-system-config/files/minebox-web.service"
 ! grep -Fq 'network-online.target' "$ROOT_DIR/pi-gen/stage-minebox/01-system-config/files/minebox-firstboot.service"
 grep -Fqx 'ExecStart=/usr/bin/python3 /opt/minebox/main.py' "$ROOT_DIR/pi-gen/stage-minebox/01-system-config/files/minebox-ui.service"
+grep -Fqx 'ExecStart=/usr/bin/python3 -m uvicorn api.server:app --host 0.0.0.0 --port 80' "$ROOT_DIR/pi-gen/stage-minebox/01-system-config/files/minebox-web.service"
+grep -Fq 'systemctl enable minebox-web.service' "$ROOT_DIR/pi-gen/stage-minebox/01-system-config/00-run-chroot.sh"
+grep -Fqx 'python3-fastapi' "$ROOT_DIR/pi-gen/stage-minebox/00-install-minebox/00-packages"
+grep -Fqx 'python3-uvicorn' "$ROOT_DIR/pi-gen/stage-minebox/00-install-minebox/00-packages"
 
 python3 -m compileall -q "$ROOT_DIR/app"
 find "$ROOT_DIR/app" -type d -name __pycache__ -prune -exec rm -rf {} +
