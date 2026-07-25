@@ -1,0 +1,20 @@
+#!/usr/sbin/nft -f
+
+flush ruleset
+
+table inet minebox_filter {
+    chain forward {
+        type filter hook forward priority 0; policy drop;
+
+        ct state established,related accept
+        iifname "wlan0" oifname != "wlan0" ip saddr 192.168.4.0/24 accept
+        iifname != "wlan0" oifname "wlan0" ip daddr 192.168.4.0/24 ct state established,related accept
+    }
+}
+
+table ip minebox_nat {
+    chain postrouting {
+        type nat hook postrouting priority 100; policy accept;
+        ip saddr 192.168.4.0/24 oifname != "wlan0" masquerade
+    }
+}
