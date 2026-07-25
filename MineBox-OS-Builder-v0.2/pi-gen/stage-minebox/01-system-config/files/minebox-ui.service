@@ -1,7 +1,6 @@
 [Unit]
 Description=MineBox Appliance Interface
-After=network-online.target minebox-firstboot.service
-Wants=network-online.target
+After=minebox-firstboot.service systemd-user-sessions.service
 Requires=minebox-firstboot.service
 Conflicts=getty@tty1.service
 
