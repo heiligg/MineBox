@@ -12,6 +12,7 @@ systemctl disable getty@tty1.service || true
 systemctl mask getty@tty1.service
 systemctl enable minebox-firstboot.service
 systemctl enable minebox-ui.service
+systemctl enable minebox-web.service
 systemctl enable minecraft.service
 systemctl enable ssh.service
 
