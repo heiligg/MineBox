@@ -21,6 +21,8 @@ required_nonempty=(
   "pi-gen/stage-minebox/02-dedicated-hotspot/files/dnsmasq-minebox.conf"
   "pi-gen/stage-minebox/02-dedicated-hotspot/files/20-minebox-wlan0.network"
   "pi-gen/stage-minebox/02-dedicated-hotspot/files/10-minebox-unmanaged.conf"
+  "pi-gen/stage-minebox/02-dedicated-hotspot/files/minebox-hotspot.nft"
+  "pi-gen/stage-minebox/02-dedicated-hotspot/files/90-minebox-router.conf"
 )
 
 for item in "${required_nonempty[@]}"; do
@@ -51,6 +53,10 @@ grep -Fqx 'rsn_pairwise=CCMP' "$ROOT_DIR/pi-gen/stage-minebox/02-dedicated-hotsp
 grep -Fq '192.168.4.1/24' "$ROOT_DIR/pi-gen/stage-minebox/02-dedicated-hotspot/files/20-minebox-wlan0.network"
 grep -Fqx 'unmanaged-devices=interface-name:wlan0' "$ROOT_DIR/pi-gen/stage-minebox/02-dedicated-hotspot/files/10-minebox-unmanaged.conf"
 grep -Fqx 'bind-dynamic' "$ROOT_DIR/pi-gen/stage-minebox/02-dedicated-hotspot/files/dnsmasq-minebox.conf"
+! grep -Fqx 'no-resolv' "$ROOT_DIR/pi-gen/stage-minebox/02-dedicated-hotspot/files/dnsmasq-minebox.conf"
+grep -Fqx 'net.ipv4.ip_forward=1' "$ROOT_DIR/pi-gen/stage-minebox/02-dedicated-hotspot/files/90-minebox-router.conf"
+grep -Fq 'masquerade' "$ROOT_DIR/pi-gen/stage-minebox/02-dedicated-hotspot/files/minebox-hotspot.nft"
+grep -Fq 'systemctl enable nftables.service' "$ROOT_DIR/pi-gen/stage-minebox/02-dedicated-hotspot/02-run-chroot.sh"
 
 # The dashboard and first-boot setup must not wait on network-online. The local
 # appliance UI should come up even if the hotspot or upstream network is delayed.
