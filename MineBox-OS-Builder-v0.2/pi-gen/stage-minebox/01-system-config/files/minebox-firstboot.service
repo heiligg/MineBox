@@ -1,7 +1,5 @@
 [Unit]
 Description=MineBox first-boot initialization
-After=network-online.target
-Wants=network-online.target
 ConditionPathExists=!/var/lib/minebox/firstboot-complete
 
 [Service]
