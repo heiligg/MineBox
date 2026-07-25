@@ -1,0 +1,17 @@
+[Unit]
+Description=MineBox Online Dashboard
+After=minebox-firstboot.service systemd-user-sessions.service
+Requires=minebox-firstboot.service
+
+[Service]
+Type=simple
+User=minebox
+Group=minebox
+WorkingDirectory=/opt/minebox
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 -m uvicorn api.server:app --host 0.0.0.0 --port 80
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
