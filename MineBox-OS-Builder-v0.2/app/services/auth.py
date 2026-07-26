@@ -27,6 +27,36 @@ AUTH_FILE = Path(
 
 DEFAULT_USERNAME = "admin"
 
+TRIVIAL_PASSWORDS = {
+    "minebox",
+    "minecraft",
+    "password",
+    "password1",
+    "password123",
+    "admin",
+    "admin123",
+    "12345678",
+    "123456789012",
+    "letmein",
+    "changeme",
+    "raspberry",
+    "pi",
+}
+
+
+def validate_password(password: str) -> None:
+    if len(password) < 12:
+        raise ValueError(
+            "Password must contain at least 12 characters."
+        )
+    if len(password) > 200:
+        raise ValueError("Password is too long.")
+    normalized = password.lower().strip()
+    if normalized in TRIVIAL_PASSWORDS or normalized.startswith("minebox"):
+        raise ValueError(
+            "Choose a stronger password (not a common default like minebox/password)."
+        )
+
 
 def _ensure_parent_directory() -> None:
     AUTH_FILE.parent.mkdir(
@@ -188,13 +218,7 @@ def create_admin(
             "Username cannot be longer than 64 characters."
         )
 
-    if len(password) < 8:
-        raise ValueError(
-            "Password must contain at least 8 characters."
-        )
-
-    if len(password) > 200:
-        raise ValueError("Password is too long.")
+    validate_password(password)
 
     data = _load()
 
@@ -265,3 +289,46 @@ def verify_credentials(
         supplied_hash,
         expected_hash,
     )
+
+
+def change_password(
+    current_password: str,
+    new_password: str,
+) -> None:
+    data = _load()
+    username = get_username()
+    if not verify_credentials(username, current_password):
+        raise ValueError("Current password is incorrect.")
+    validate_password(new_password)
+    if hmac.compare_digest(current_password, new_password):
+        raise ValueError("New password must be different from the current password.")
+
+    salt = secrets.token_bytes(32)
+    password_hash = _derive_password_hash(new_password, salt)
+    data["password_salt"] = salt.hex()
+    data["password_hash"] = password_hash.hex()
+    data["password_changed_at"] = (
+        __import__("datetime")
+        .datetime.now(__import__("datetime").timezone.utc)
+        .isoformat()
+    )
+    _save(data)
+
+
+def security_reminder_status() -> dict[str, Any]:
+    data = _load()
+    dismissed = bool(data.get("security_reminder_dismissed"))
+    return {
+        "dismissed": dismissed,
+        "show_reminder": not dismissed,
+        "message": (
+            "Change the MineBox admin password and the Linux/SSH "
+            "`minebox` user password before exposing this device on a network."
+        ),
+    }
+
+
+def dismiss_security_reminder() -> None:
+    data = _load()
+    data["security_reminder_dismissed"] = True
+    _save(data)

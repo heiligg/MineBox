@@ -459,6 +459,74 @@ def system_status() -> dict[str, float | str | None]:
 
     fan = fan_status()
 
+    alerts: list[dict[str, str]] = []
+    if temperature_c is not None and temperature_c >= 80.0:
+        alerts.append(
+            {
+                "id": "high_temperature",
+                "level": "warning",
+                "message": (
+                    f"CPU temperature is high ({temperature_c:.1f}°C). "
+                    "Check cooling and airflow."
+                ),
+            }
+        )
+    if disk_percent >= 90.0 or (
+        disk_total_gb > 0 and disk_free_gb < disk_total_gb * 0.1
+    ):
+        alerts.append(
+            {
+                "id": "disk_low",
+                "level": "warning",
+                "message": (
+                    f"Disk space is low ({disk_percent}% used, "
+                    f"{disk_free_gb} GB free)."
+                ),
+            }
+        )
+
+    try:
+        from services import diagnostics
+        from services import minecraft
+
+        if not minecraft.is_running():
+            crash = diagnostics.latest_crash_summary()
+            hint = ""
+            try:
+                hint = minecraft._recent_failure_hint()
+            except Exception:
+                hint = ""
+            crash_looks_real = (
+                crash
+                and "no crash reports" not in crash.lower()
+            )
+            if crash_looks_real or (
+                hint
+                and any(
+                    token in hint.lower()
+                    for token in (
+                        "error",
+                        "exception",
+                        "failed",
+                        "crash",
+                        "outofmemory",
+                    )
+                )
+            ):
+                detail = hint or crash
+                alerts.append(
+                    {
+                        "id": "server_crashed",
+                        "level": "error",
+                        "message": (
+                            "Minecraft looks like it crashed or failed to stay up. "
+                            f"{detail[:220]}"
+                        ),
+                    }
+                )
+    except Exception:
+        pass
+
     return {
         "cpu_percent": sample_item.cpu,
         "memory_percent": sample_item.memory,
@@ -480,6 +548,7 @@ def system_status() -> dict[str, float | str | None]:
         "architecture": platform.machine() or None,
         "server_memory_mb": minecraft_memory,
         "minecraft_memory_mb": minecraft_memory,
+        "alerts": alerts,
         **fan,
     }
 

@@ -131,16 +131,54 @@ def list_backups() -> list[dict[str, Any]]:
 
 
 def backup_status() -> dict[str, Any]:
+    from services import maintenance
+    from services import settings as minebox_settings
+
     backups = list_backups()
+    cfg = minebox_settings.load()
+    retention = int(cfg.get("backup_retention", DEFAULT_RETENTION) or DEFAULT_RETENTION)
+    interval_hours = max(0, int(cfg.get("automatic_backup_hours", 0) or 0))
+    state = maintenance._state()
+    last_auto = float(state.get("last_auto_backup", 0) or 0)
+    next_due = None
+    if interval_hours > 0:
+        next_due = last_auto + (interval_hours * 3600) if last_auto else None
 
     return {
         "backup_directory": str(_backup_dir()),
         "world_directory": str(_world_dir()),
         "backup_count": len(backups),
         "busy": _backup_lock.locked(),
-        "retention": DEFAULT_RETENTION,
+        "retention": retention,
+        "automatic_backup_hours": interval_hours,
+        "last_auto_backup": last_auto or None,
+        "next_auto_backup": next_due,
         "backups": backups,
     }
+
+
+def update_backup_settings(
+    *,
+    automatic_backup_hours: int | None = None,
+    retention: int | None = None,
+) -> dict[str, Any]:
+    from services import settings as minebox_settings
+
+    cfg = minebox_settings.load()
+    if automatic_backup_hours is not None:
+        hours = int(automatic_backup_hours)
+        if hours < 0 or hours > 168:
+            raise BackupError("Automatic backup hours must be between 0 and 168.")
+        cfg["automatic_backup_hours"] = hours
+    if retention is not None:
+        keep = int(retention)
+        if keep < 1 or keep > 100:
+            raise BackupError("Retention must be between 1 and 100.")
+        cfg["backup_retention"] = keep
+    ok, message = minebox_settings.save(cfg)
+    if not ok:
+        raise BackupError(message or "Could not save backup settings.")
+    return backup_status()
 
 
 def _remove_old_backups(retention: int) -> list[str]:

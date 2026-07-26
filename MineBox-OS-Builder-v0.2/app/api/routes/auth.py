@@ -379,13 +379,13 @@ def setup_page(
         autofocus
     >
 
-    <label for="password">Password</label>
+    <label for="password">Password (at least 12 characters)</label>
     <input
         id="password"
         name="password"
         type="password"
         autocomplete="new-password"
-        minlength="8"
+        minlength="12"
         maxlength="200"
         required
     >
@@ -396,7 +396,7 @@ def setup_page(
         name="confirmation"
         type="password"
         autocomplete="new-password"
-        minlength="8"
+        minlength="12"
         maxlength="200"
         required
     >
@@ -473,7 +473,8 @@ def setup_page(
             "Secure your MineBox",
             (
                 "Create the administrator account used to "
-                "manage this appliance."
+                "manage this appliance. Use a strong password "
+                "(at least 12 characters)."
             ),
             form,
             script,
@@ -600,6 +601,8 @@ def authentication_status(
         request.session.get("authenticated") is True
     )
 
+    reminder = auth.security_reminder_status()
+
     return {
         "ok": True,
         "configured": auth.is_configured(),
@@ -609,4 +612,46 @@ def authentication_status(
             if authenticated
             else None
         ),
+        "security_reminder": reminder,
     }
+
+
+@router.post("/api/v1/auth/change-password")
+async def change_password(request: Request):
+    if request.session.get("authenticated") is not True:
+        return JSONResponse(
+            {"ok": False, "detail": "Authentication required."},
+            status_code=401,
+        )
+
+    form = await read_form_body(request)
+    current_password = form.get("current_password", "")
+    new_password = form.get("new_password", "")
+    confirmation = form.get("confirmation", "")
+
+    if new_password != confirmation:
+        return JSONResponse(
+            {"ok": False, "detail": "The passwords do not match."},
+            status_code=400,
+        )
+
+    try:
+        auth.change_password(current_password, new_password)
+    except ValueError as exc:
+        return JSONResponse(
+            {"ok": False, "detail": str(exc)},
+            status_code=400,
+        )
+
+    return {"ok": True, "message": "Password updated."}
+
+
+@router.post("/api/v1/auth/security-reminder/dismiss")
+def dismiss_security_reminder(request: Request):
+    if request.session.get("authenticated") is not True:
+        return JSONResponse(
+            {"ok": False, "detail": "Authentication required."},
+            status_code=401,
+        )
+    auth.dismiss_security_reminder()
+    return {"ok": True, **auth.security_reminder_status()}

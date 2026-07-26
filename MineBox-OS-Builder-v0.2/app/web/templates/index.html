@@ -774,12 +774,44 @@
             cursor: not-allowed;
         }
 
-        .fan-hint {
-            margin: 0 0 10px;
-            color: var(--muted, #8e9bad);
-            font-size: 0.72rem;
-            line-height: 1.35;
+        .system-alerts {
+            display: grid;
+            gap: 8px;
+            margin: 0 0 16px;
         }
+
+        .system-alerts[hidden] {
+            display: none;
+        }
+
+        .system-alert {
+            padding: 12px 14px;
+            border-radius: 12px;
+            font-size: 0.9rem;
+            line-height: 1.4;
+            border: 1px solid transparent;
+        }
+
+        .system-alert.warning {
+            background: rgba(255, 180, 60, 0.12);
+            border-color: rgba(255, 180, 60, 0.28);
+            color: #ffd27a;
+        }
+
+        .system-alert.error {
+            background: rgba(220, 80, 80, 0.12);
+            border-color: rgba(220, 80, 80, 0.28);
+            color: #ff9c9c;
+        }
+
+        .meter-fill.warn {
+            background: #ffb020;
+        }
+
+        .meter-fill.danger {
+            background: #ff6b6b;
+        }
+
 
         .summary-row strong {
             overflow-wrap: anywhere;
@@ -967,6 +999,44 @@
             font-size: 0.84rem;
             line-height: 1.55;
             text-align: center;
+        }
+
+        .backup-schedule {
+            margin: 0 0 16px;
+            padding: 14px;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .backup-schedule-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+            color: var(--text, #e8eef7);
+            font-size: 0.9rem;
+        }
+
+        .backup-schedule-row select,
+        .backup-schedule-row input[type="number"] {
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.25);
+            color: inherit;
+            font: inherit;
+            padding: 8px 10px;
+        }
+
+        .backup-schedule-row input[type="number"] {
+            width: 72px;
+        }
+
+        .backup-schedule-note {
+            margin: 10px 0 0;
+            color: var(--muted, #8e9bad);
+            font-size: 0.78rem;
+            line-height: 1.4;
         }
 
         @media (max-width: 700px) {
@@ -1430,6 +1500,14 @@
                 </div>
             </header>
 
+            <div
+                id="system-alerts"
+                class="system-alerts"
+                hidden
+                role="status"
+                aria-live="polite"
+            ></div>
+
             <section class="hero">
                 <article class="panel server-card">
                     <div class="status-label">Active server</div>
@@ -1849,6 +1927,44 @@
                         </div>
                     </div>
 
+                    <div class="backup-schedule" id="backup-schedule">
+                        <div class="backup-schedule-row">
+                            <label for="backup-interval-hours">
+                                Auto-backup every
+                            </label>
+                            <select id="backup-interval-hours">
+                                <option value="0">Off</option>
+                                <option value="1">1 hour</option>
+                                <option value="3">3 hours</option>
+                                <option value="6">6 hours</option>
+                                <option value="12">12 hours</option>
+                                <option value="24">24 hours</option>
+                                <option value="48">48 hours</option>
+                            </select>
+                            <label for="backup-retention-input">
+                                Keep
+                            </label>
+                            <input
+                                id="backup-retention-input"
+                                type="number"
+                                min="1"
+                                max="100"
+                                value="10"
+                            />
+                            <span>backups</span>
+                            <button
+                                type="button"
+                                class="backup-button"
+                                id="backup-settings-save"
+                            >
+                                Save schedule
+                            </button>
+                        </div>
+                        <p class="backup-schedule-note" id="backup-schedule-note">
+                            Automatic backups run via minebox-maintenance.timer.
+                        </p>
+                    </div>
+
                     <div
                         class="backup-message"
                         id="backup-message"
@@ -2209,6 +2325,9 @@
         const actionMessage =
             document.getElementById("action-message");
 
+        const systemAlerts =
+            document.getElementById("system-alerts");
+
 
         const backupNowButton =
             document.getElementById("backup-now-button");
@@ -2224,6 +2343,18 @@
 
         const backupLatestValue =
             document.getElementById("backup-latest-value");
+
+        const backupIntervalHours =
+            document.getElementById("backup-interval-hours");
+
+        const backupRetentionInput =
+            document.getElementById("backup-retention-input");
+
+        const backupSettingsSave =
+            document.getElementById("backup-settings-save");
+
+        const backupScheduleNote =
+            document.getElementById("backup-schedule-note");
 
         const backupMessage =
             document.getElementById("backup-message");
@@ -2343,16 +2474,48 @@
             );
 
             fill.style.width = `${percentage}%`;
+            fill.classList.remove("warn", "danger");
+            if (percentage >= 90) {
+                fill.classList.add("danger");
+            } else if (percentage >= 75) {
+                fill.classList.add("warn");
+            }
             meter.setAttribute(
                 "aria-valuenow",
                 percentage.toFixed(1)
             );
         }
 
+        function renderSystemAlerts(system) {
+            if (!systemAlerts) {
+                return;
+            }
+            const alerts = Array.isArray(system.alerts)
+                ? system.alerts
+                : [];
+            systemAlerts.innerHTML = "";
+            if (!alerts.length) {
+                systemAlerts.hidden = true;
+                return;
+            }
+            systemAlerts.hidden = false;
+            for (const alert of alerts) {
+                const item = document.createElement("div");
+                item.className = `system-alert ${
+                    alert.level || "warning"
+                }`;
+                item.textContent =
+                    alert.message || "System warning";
+                systemAlerts.appendChild(item);
+            }
+        }
+
         function updateSystem(system) {
             if (!system) {
                 return;
             }
+
+            renderSystemAlerts(system);
 
             const cpuPercent =
                 numberOrZero(system.cpu_percent);
@@ -2394,6 +2557,13 @@
                 temperatureValue.classList.remove(
                     "system-value-unavailable"
                 );
+                if (system.cpu_temperature_c >= 80) {
+                    temperatureValue.style.color = "#ff9c9c";
+                } else if (system.cpu_temperature_c >= 70) {
+                    temperatureValue.style.color = "#ffd27a";
+                } else {
+                    temperatureValue.style.color = "";
+                }
             }
 
             if (fanValue) {
@@ -2660,6 +2830,46 @@
                 backupLatestValue.textContent = "None yet";
             }
 
+            if (backupIntervalHours && !backupIntervalHours.matches(":focus")) {
+                const hours = String(
+                    data.automatic_backup_hours ?? 0
+                );
+                if (
+                    [...backupIntervalHours.options].some(
+                        (option) => option.value === hours
+                    )
+                ) {
+                    backupIntervalHours.value = hours;
+                }
+            }
+
+            if (
+                backupRetentionInput &&
+                !backupRetentionInput.matches(":focus")
+            ) {
+                backupRetentionInput.value = String(
+                    data.retention ?? 10
+                );
+            }
+
+            if (backupScheduleNote) {
+                const interval = Number(
+                    data.automatic_backup_hours || 0
+                );
+                if (interval <= 0) {
+                    backupScheduleNote.textContent =
+                        "Automatic backups are off. Runs via minebox-maintenance.timer when enabled.";
+                } else if (data.last_auto_backup) {
+                    backupScheduleNote.textContent =
+                        `Last auto-backup: ${formatBackupDate(
+                            data.last_auto_backup * 1000
+                        )}. Interval: every ${interval}h.`;
+                } else {
+                    backupScheduleNote.textContent =
+                        `Auto-backup every ${interval}h via minebox-maintenance.timer (no run recorded yet).`;
+                }
+            }
+
             const retention =
                 Number(data.retention) || 10;
 
@@ -2837,12 +3047,11 @@
             const confirmed = window.confirm(
                 "Restore this Minecraft world backup?\n\n" +
                 filename +
-                "\n\nMineBox will:\n" +
-                "• Stop the Minecraft server if it is running\n" +
-                "• Create a safety backup of the current world\n" +
-                "• Replace the current world with this backup\n" +
-                "• Restart the server if it was running\n\n" +
-                "Players should disconnect before continuing."
+                "\n\nMineBox will run this safe sequence:\n" +
+                "1. STOP the Minecraft server (if running)\n" +
+                "2. RESTORE this backup (after a safety copy of the current world)\n" +
+                "3. START the server again (if it was running)\n\n" +
+                "Ask players to disconnect before continuing. This cannot be undone except via the safety backup."
             );
 
             if (!confirmed) {
@@ -2891,6 +3100,14 @@
                 let message =
                     restored.message ||
                     `Backup ${filename} was restored successfully.`;
+
+                if (restored.server_was_running) {
+                    message +=
+                        "\n\nCompleted: Stop → Restore → Start.";
+                } else {
+                    message +=
+                        "\n\nCompleted: Restore (server was already stopped).";
+                }
 
                 if (safetyBackup.filename) {
                     message +=
@@ -3494,6 +3711,57 @@
             createWorldBackup
         );
 
+        if (backupSettingsSave) {
+            backupSettingsSave.addEventListener(
+                "click",
+                async () => {
+                    backupSettingsSave.disabled = true;
+                    try {
+                        const response = await fetch(
+                            "/api/v1/backups/settings",
+                            {
+                                method: "PUT",
+                                credentials: "same-origin",
+                                headers: {
+                                    Accept: "application/json",
+                                    "Content-Type": "application/json"
+                                },
+                                body: JSON.stringify({
+                                    automatic_backup_hours: Number(
+                                        backupIntervalHours.value || 0
+                                    ),
+                                    retention: Number(
+                                        backupRetentionInput.value || 10
+                                    )
+                                })
+                            }
+                        );
+                        const data = await readResponse(response);
+                        if (!response.ok) {
+                            throw new Error(
+                                data.detail ||
+                                    data.message ||
+                                    "Could not save backup schedule."
+                            );
+                        }
+                        showBackupMessage(
+                            "Backup schedule saved.",
+                            "success"
+                        );
+                        renderBackups(data);
+                    } catch (error) {
+                        showBackupMessage(
+                            error.message ||
+                                "Could not save backup schedule.",
+                            "error"
+                        );
+                    } finally {
+                        backupSettingsSave.disabled = false;
+                    }
+                }
+            );
+        }
+
         if (fanTestButton) {
             fanTestButton.addEventListener(
                 "click",
@@ -3601,5 +3869,7 @@
 <script src="/static/js/network.js"></script>
 <script src="/static/js/join.js"></script>
 <script src="/static/js/files.js"></script>
+<script src="/static/js/players.js"></script>
+<script src="/static/js/security.js"></script>
 </body>
 </html>

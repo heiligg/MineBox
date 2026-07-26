@@ -4,6 +4,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
 from services import backups
 
@@ -14,6 +15,12 @@ router = APIRouter(
 )
 
 
+class BackupSettingsRequest(BaseModel):
+    automatic_backup_hours: int | None = Field(default=None, ge=0, le=168)
+    retention: int | None = Field(default=None, ge=1, le=100)
+    backup_retention: int | None = Field(default=None, ge=1, le=100)
+
+
 @router.get("")
 def get_backups() -> dict[str, Any]:
     return {
@@ -22,17 +29,34 @@ def get_backups() -> dict[str, Any]:
     }
 
 
+@router.put("/settings")
+def put_backup_settings(body: BackupSettingsRequest) -> dict[str, Any]:
+    try:
+        status = backups.update_backup_settings(
+            automatic_backup_hours=body.automatic_backup_hours,
+            retention=body.retention
+            if body.retention is not None
+            else body.backup_retention,
+        )
+    except backups.BackupError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **status}
+
+
 @router.post("")
 def create_backup(
-    retention: int = Query(
-        default=backups.DEFAULT_RETENTION,
+    retention: int | None = Query(
+        default=None,
         ge=1,
         le=100,
     ),
 ) -> dict[str, Any]:
     try:
+        keep = retention
+        if keep is None:
+            keep = int(backups.backup_status().get("retention") or backups.DEFAULT_RETENTION)
         result = backups.create_backup(
-            retention=retention,
+            retention=keep,
         )
 
     except backups.BackupError as exc:

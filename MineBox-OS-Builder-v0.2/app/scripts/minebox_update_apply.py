@@ -307,6 +307,13 @@ def install_systemd_units(target: Path, dev: bool) -> None:
             break
 
     run(["systemctl", "daemon-reload"], timeout=60)
+    subprocess.run(
+        ["systemctl", "enable", "--now", "minebox-maintenance.timer"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
 
 
 def install_minecraft_permissions(target: Path, dev: bool) -> None:
