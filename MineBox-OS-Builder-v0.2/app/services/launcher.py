@@ -22,6 +22,10 @@ def _version_tuple(version: str) -> tuple[int, ...]:
 
 def _required_java_major(version: str) -> int:
     parsed = _version_tuple(version)
+    # Mojang calendar-style IDs (25.x / 26.x / …) are not classic 1.x versions.
+    # Minecraft 26.x ships class-file 69 → needs Java 25+.
+    if parsed and parsed[0] >= 25 and parsed[0] < 100:
+        return 25
     if parsed and parsed <= (1, 16, 5):
         return 8
     if parsed and parsed < (1, 20, 5):
@@ -32,6 +36,8 @@ def _required_java_major(version: str) -> int:
 def _max_java_major(version: str) -> int | None:
     """Old LaunchWrapper Forge breaks on Java 9+ with ClassCastException."""
     parsed = _version_tuple(version)
+    if parsed and parsed[0] >= 25 and parsed[0] < 100:
+        return None
     if parsed and parsed <= (1, 12, 2):
         return 8
     if parsed and parsed < (1, 17):
@@ -43,9 +49,13 @@ def _java_candidates(version: str) -> list[str]:
     configured = os.environ.get("MINEBOX_JAVA")
     candidates: list[str] = [configured] if configured else []
     major = _required_java_major(version)
-    maximum = _max_java_major(version) or major
+    maximum = _max_java_major(version)
+    if maximum is None:
+        majors = list(range(major, major + 3))
+    else:
+        majors = list(range(major, maximum + 1))
 
-    for value in range(major, maximum + 1):
+    for value in majors:
         candidates.extend(
             [
                 f"/opt/java/temurin-{value}/bin/java",
