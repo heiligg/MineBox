@@ -361,6 +361,15 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
             timeout=900,
         )
 
+    # Allow the dashboard user to read live Minecraft service logs.
+    subprocess.run(
+        ["usermod", "-aG", "systemd-journal", "minebox"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
     # LAN discovery (.local) + optional UPnP helper for internet joins.
     subprocess.run(
         [
@@ -408,6 +417,7 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
         "/usr/local/sbin/minebox-install-avahi, "
         "/usr/bin/python3 /opt/minebox/scripts/minebox_ensure_java.py, "
         "/usr/local/sbin/minebox-ensure-java, "
+        "/usr/bin/journalctl -u minecraft.service *, "
         "/usr/bin/systemctl poweroff, "
         "/usr/bin/systemctl reboot\n"
     )

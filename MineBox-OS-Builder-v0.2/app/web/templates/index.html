@@ -3065,8 +3065,14 @@
                 return false;
             }
 
-            return String(line).includes(
-                "Rcon connection from:"
+            const text = String(line);
+            const normalized = text.toLowerCase();
+            return (
+                text.includes("Rcon connection from:") ||
+                text.includes("RCON Client #") ||
+                normalized.includes("[rcon:") ||
+                normalized.includes("/rcon listener") ||
+                normalized.includes("rcon running on")
             );
         }
 

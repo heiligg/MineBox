@@ -12,6 +12,9 @@ Environment=PYTHONPATH=/opt/minebox
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 -m services.launcher
 TimeoutStartSec=900
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=minebox-minecraft
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=45
