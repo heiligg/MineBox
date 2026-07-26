@@ -26,16 +26,18 @@ class InstallUrlRequest(BaseModel):
 
 
 class CurseForgeKeyRequest(BaseModel):
-    api_key: str = Field(default="", max_length=256)
+    api_key: str = Field(default="", max_length=512)
 
 
 def _http_error(error: mods.ModsError) -> HTTPException:
     message = str(error)
     lower = message.lower()
     status = 400
-    if "no active" in lower or "missing" in lower:
+    if "rejected the api key" in lower or "rate-limited" in lower:
+        status = 403
+    elif "no active" in lower or "missing" in lower:
         status = 400
-    elif "api key" in lower:
+    elif "api key" in lower or "needs an api key" in lower:
         status = 400
     elif "request failed" in lower or "download failed" in lower:
         status = 502
@@ -94,13 +96,21 @@ def get_curseforge_key_status() -> dict[str, Any]:
 
 @router.put("/curseforge-key")
 def put_curseforge_key(body: CurseForgeKeyRequest) -> dict[str, Any]:
-    mods.set_curseforge_api_key(body.api_key)
+    clean = (body.api_key or "").strip()
+    if not clean:
+        mods.set_curseforge_api_key(None)
+        return {
+            "ok": True,
+            "configured": False,
+            "message": "CurseForge API key cleared.",
+        }
+    try:
+        mods.validate_curseforge_api_key(clean)
+    except mods.ModsError as error:
+        raise _http_error(error) from error
+    mods.set_curseforge_api_key(clean)
     return {
         "ok": True,
-        "configured": bool(mods.curseforge_api_key()),
-        "message": (
-            "CurseForge API key saved."
-            if body.api_key.strip()
-            else "CurseForge API key cleared."
-        ),
+        "configured": True,
+        "message": "CurseForge API key verified and saved.",
     }

@@ -299,6 +299,27 @@
         }
     }
 
+    function curseForgeErrorMessage(raw) {
+        const text = String(raw || "").trim();
+        if (!text) {
+            return "CurseForge request failed.";
+        }
+        const lower = text.toLowerCase();
+        if (
+            lower.includes("rejected the api key")
+            || lower.includes("rate-limited")
+            || lower.includes("403")
+            || lower.includes("forbidden")
+        ) {
+            return (
+                "CurseForge rejected the API key (invalid or rate-limited). "
+                + "Regenerate at console.curseforge.com, wait if you hit limits, "
+                + "then paste the new key and save again. Modrinth and URL paste still work."
+            );
+        }
+        return text;
+    }
+
     async function runSearch() {
         if (busy) {
             return;
@@ -326,7 +347,11 @@
             renderResults(payload.results || []);
             showMessage(`Found ${payload.total || 0} results on ${label}.`, "success");
         } catch (error) {
-            showMessage(error.message || "Search failed.", "error");
+            const msg = error.message || "Search failed.";
+            showMessage(
+                provider === "curseforge" ? curseForgeErrorMessage(msg) : msg,
+                "error"
+            );
         } finally {
             busy = false;
         }
@@ -354,7 +379,11 @@
                 "success"
             );
         } catch (error) {
-            showMessage(error.message || "Install failed.", "error");
+            const msg = error.message || "Install failed.";
+            showMessage(
+                source === "curseforge" ? curseForgeErrorMessage(msg) : msg,
+                "error"
+            );
         } finally {
             busy = false;
         }
@@ -364,12 +393,13 @@
         if (busy) {
             return;
         }
+        const raw = (cfKeyInput && cfKeyInput.value) || "";
         busy = true;
-        showMessage("Saving CurseForge API key…");
+        showMessage(raw.trim() ? "Verifying CurseForge API key…" : "Clearing CurseForge API key…");
         try {
             const payload = await api(`${API_BASE}/curseforge-key`, {
                 method: "PUT",
-                body: JSON.stringify({ api_key: (cfKeyInput && cfKeyInput.value) || "" }),
+                body: JSON.stringify({ api_key: raw }),
             });
             if (cfKeyInput) {
                 cfKeyInput.value = "";
@@ -378,7 +408,10 @@
             showMessage(payload.message || "Saved.", "success");
             await loadContext();
         } catch (error) {
-            showMessage(error.message || "Could not save API key.", "error");
+            showMessage(
+                curseForgeErrorMessage(error.message || "Could not save API key."),
+                "error"
+            );
         } finally {
             busy = false;
         }

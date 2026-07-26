@@ -99,6 +99,18 @@ def _project_types(loader: str | None = None) -> list[str]:
     return ["mod"]
 
 
+_CF_KEY_REJECTED = (
+    "CurseForge rejected the API key (invalid or rate-limited). "
+    "Regenerate at https://console.curseforge.com/, wait about an hour "
+    "if you hit rate limits, then paste the new key and save again."
+)
+_CF_KEY_MISSING = (
+    "CurseForge needs an API key. Add a free key from "
+    "https://console.curseforge.com/ under Security, or set "
+    "MINEBOX_CURSEFORGE_API_KEY."
+)
+
+
 def curseforge_api_key() -> str | None:
     env = os.environ.get("MINEBOX_CURSEFORGE_API_KEY", "").strip()
     if env:
@@ -112,9 +124,17 @@ def curseforge_api_key() -> str | None:
     return None
 
 
+def _ensure_key_dir() -> None:
+    CURSEFORGE_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.chmod(CURSEFORGE_KEY_FILE.parent, 0o755)
+    except OSError:
+        pass
+
+
 def set_curseforge_api_key(key: str | None) -> None:
     clean = (key or "").strip()
-    CURSEFORGE_KEY_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _ensure_key_dir()
     if not clean:
         CURSEFORGE_KEY_FILE.unlink(missing_ok=True)
         return
@@ -123,6 +143,35 @@ def set_curseforge_api_key(key: str | None) -> None:
         os.chmod(CURSEFORGE_KEY_FILE, 0o600)
     except OSError:
         pass
+
+
+def _cf_http_error_message(error: urllib.error.HTTPError) -> str:
+    code = int(getattr(error, "code", 0) or 0)
+    if code in {401, 403}:
+        return _CF_KEY_REJECTED
+    return f"CurseForge request failed: HTTP Error {code}: {error.reason}"
+
+
+def validate_curseforge_api_key(key: str, *, timeout: int = 30) -> None:
+    """Probe CurseForge with the given key; raise ModsError if rejected."""
+    clean = (key or "").strip()
+    if not clean:
+        raise ModsError(_CF_KEY_MISSING)
+    req = urllib.request.Request(
+        f"{CURSEFORGE_API}/games/{CURSEFORGE_GAME_ID}",
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json",
+            "x-api-key": clean,
+        },
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            response.read(64)
+    except urllib.error.HTTPError as error:
+        raise ModsError(_cf_http_error_message(error)) from error
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        raise ModsError(f"CurseForge request failed: {error}") from error
 
 
 def _request(url: str, timeout: int = 45) -> urllib.request.Request:
@@ -135,14 +184,10 @@ def _request(url: str, timeout: int = 45) -> urllib.request.Request:
     )
 
 
-def _cf_request(url: str, timeout: int = 45) -> urllib.request.Request:
-    key = curseforge_api_key()
+def _cf_request(url: str, *, api_key: str | None = None) -> urllib.request.Request:
+    key = (api_key or curseforge_api_key() or "").strip()
     if not key:
-        raise ModsError(
-            "CurseForge needs an API key. Add a free key from "
-            "https://console.curseforge.com/ under Security, or set "
-            "MINEBOX_CURSEFORGE_API_KEY."
-        )
+        raise ModsError(_CF_KEY_MISSING)
     return urllib.request.Request(
         url,
         headers={
@@ -167,6 +212,8 @@ def _load_cf_json(url: str, timeout: int = 45) -> Any:
             return json.load(response)
     except ModsError:
         raise
+    except urllib.error.HTTPError as error:
+        raise ModsError(_cf_http_error_message(error)) from error
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as error:
         raise ModsError(f"CurseForge request failed: {error}") from error
 
