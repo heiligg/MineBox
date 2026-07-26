@@ -314,6 +314,8 @@ def run_fan_test(duration_seconds: int = 8) -> dict[str, float | int | str | boo
         / "scripts"
         / "minebox_fan_test.py"
     )
+    # Must run via sudo — sysfs cooling controls are root-only.
+    # Prefer the installed helper; fall back to the OTA script path.
     commands = [
         [
             "sudo",
@@ -326,23 +328,28 @@ def run_fan_test(duration_seconds: int = 8) -> dict[str, float | int | str | boo
             "sudo",
             "-n",
             "/usr/bin/python3",
-            str(script),
-            "--seconds",
-            str(duration_seconds),
-        ],
-        [
-            "/usr/bin/python3",
-            str(script),
+            "/opt/minebox/scripts/minebox_fan_test.py",
             "--seconds",
             str(duration_seconds),
         ],
     ]
+    if script.is_file() and script.resolve() != Path(
+        "/opt/minebox/scripts/minebox_fan_test.py"
+    ).resolve():
+        commands.append(
+            [
+                "sudo",
+                "-n",
+                "/usr/bin/python3",
+                str(script),
+                "--seconds",
+                str(duration_seconds),
+            ]
+        )
 
     last_error = "Fan test failed."
     ran = False
     for command in commands:
-        if "minebox_fan_test.py" in command[-3:] and not script.is_file():
-            continue
         try:
             result = subprocess.run(
                 command,
@@ -358,7 +365,13 @@ def run_fan_test(duration_seconds: int = 8) -> dict[str, float | int | str | boo
             ran = True
             break
         detail = (result.stderr or result.stdout or "").strip()
-        last_error = detail or f"Command failed ({result.returncode})."
+        if "password is required" in detail.lower() or "a password is required" in detail.lower():
+            last_error = (
+                "Fan test needs root via sudoers. Install the latest "
+                "MineBox update, then try again."
+            )
+        else:
+            last_error = detail or f"Command failed ({result.returncode})."
 
     if not ran:
         raise RuntimeError(last_error)

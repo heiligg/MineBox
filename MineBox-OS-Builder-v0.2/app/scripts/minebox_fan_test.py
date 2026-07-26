@@ -23,6 +23,18 @@ def _write_int(path: Path, value: int) -> None:
     path.write_text(f"{int(value)}\n", encoding="utf-8")
 
 
+def _require_root() -> None:
+    import os
+
+    if os.geteuid() != 0:
+        print(
+            "Fan test must run as root via sudo "
+            "(minebox-fan-test). Permission denied writing sysfs.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+
 def _cooling_devices() -> list[Path]:
     thermal = Path("/sys/class/thermal")
     if not thermal.is_dir():
@@ -57,6 +69,7 @@ def _pwm_paths() -> list[Path]:
 
 
 def run_test(seconds: int) -> int:
+    _require_root()
     seconds = max(3, min(seconds, 20))
     restored = False
 
@@ -70,10 +83,14 @@ def run_test(seconds: int) -> int:
         try:
             _write_int(cur_path, maximum)
             time.sleep(seconds)
+        except PermissionError as error:
+            print(f"Permission denied writing {cur_path}: {error}", file=sys.stderr)
+            return 2
         finally:
             try:
-                _write_int(cur_path, previous)
-                restored = True
+                if previous is not None:
+                    _write_int(cur_path, previous)
+                    restored = True
             except OSError as error:
                 print(f"warning: could not restore fan state: {error}", file=sys.stderr)
         print(f"ok cooling_device={device.name} max={maximum} seconds={seconds}")
@@ -86,10 +103,14 @@ def run_test(seconds: int) -> int:
         try:
             _write_int(pwm, 255)
             time.sleep(seconds)
+        except PermissionError as error:
+            print(f"Permission denied writing {pwm}: {error}", file=sys.stderr)
+            return 2
         finally:
             try:
-                _write_int(pwm, previous)
-                restored = True
+                if previous is not None:
+                    _write_int(pwm, previous)
+                    restored = True
             except OSError as error:
                 print(f"warning: could not restore pwm: {error}", file=sys.stderr)
         print(f"ok pwm={pwm} seconds={seconds} restored={restored}")
@@ -112,7 +133,14 @@ def main() -> int:
         help="Seconds to hold the fan at maximum (3-20).",
     )
     args = parser.parse_args()
-    return run_test(args.seconds)
+    try:
+        return run_test(args.seconds)
+    except SystemExit as exit_error:
+        code = exit_error.code
+        return int(code) if isinstance(code, int) else 1
+    except OSError as error:
+        print(f"Fan test failed: {error}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":
