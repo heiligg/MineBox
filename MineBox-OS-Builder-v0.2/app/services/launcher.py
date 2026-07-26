@@ -275,6 +275,49 @@ def _find_forge_unix_args(server_dir: Path, instance: servers.ServerInstance) ->
     return None
 
 
+def _forge_jars(server_dir: Path) -> list[Path]:
+    jars: list[Path] = []
+    for path in sorted(server_dir.glob("forge-*.jar")):
+        name = path.name.lower()
+        if "installer" in name:
+            continue
+        jars.append(path)
+    return jars
+
+
+def _find_legacy_forge_jar(
+    server_dir: Path,
+    instance: servers.ServerInstance,
+) -> Path | None:
+    jars = _forge_jars(server_dir)
+    if not jars:
+        return None
+
+    # Prefer an exact forge-<mc>-<build>.jar when we know the versions.
+    version = (instance.version or "").strip()
+    build = (instance.loader_version or "").strip()
+    if version and build:
+        exact = server_dir / f"forge-{version}-{build}.jar"
+        if exact.is_file():
+            return exact
+        # Promo values sometimes already include the MC version prefix.
+        if build.startswith(f"{version}-"):
+            exact = server_dir / f"forge-{build}.jar"
+            if exact.is_file():
+                return exact
+
+    # Prefer non-universal / non-shim names last; main server jar first.
+    def rank(path: Path) -> tuple[int, str]:
+        name = path.name.lower()
+        if "shim" in name:
+            return (2, name)
+        if "universal" in name:
+            return (1, name)
+        return (0, name)
+
+    return sorted(jars, key=rank)[0]
+
+
 def _write_launch_record(server_dir: Path, command: list[str], java: str) -> None:
     log_dir = server_dir / "logs"
     try:
@@ -301,17 +344,37 @@ def _forge_command(
     loader = (instance.loader or "").strip().lower()
     unix_args = _find_forge_unix_args(server_dir, instance)
     run_sh = server_dir / "run.sh"
+    legacy_jar = _find_legacy_forge_jar(server_dir, instance)
     looks_like_forge = (
         loader in {"forge", "neoforge"}
         or unix_args is not None
         or run_sh.is_file()
         or (server_dir / ".minebox-forge-args").is_file()
+        or (server_dir / ".minebox-forge-jar").is_file()
+        or legacy_jar is not None
         or any(server_dir.glob("forge-*-shim.jar"))
+        or (server_dir / "libraries" / "net" / "minecraftforge").is_dir()
     )
     if not looks_like_forge:
         return None
 
+    # Keep registry honest so the dashboard shows Forge, not Vanilla.
+    if loader not in {"forge", "neoforge"}:
+        try:
+            servers.update_server_launch(
+                instance.server_id,
+                loader="forge",
+                main_jar=(
+                    f"@{unix_args.relative_to(server_dir).as_posix()}"
+                    if unix_args is not None
+                    else (legacy_jar.name if legacy_jar is not None else None)
+                ),
+            )
+        except Exception:
+            pass
+
     _write_user_jvm_args(server_dir, instance.memory_gb)
+    memory = max(1, int(instance.memory_gb))
 
     # Prefer a direct Java launch. Official run.sh often exits immediately on Pi
     # because of its `shim.jar --onlyCheckJava || exit 1` gate.
@@ -324,25 +387,31 @@ def _forge_command(
             "nogui",
         ]
 
-    parsed = _version_tuple(instance.version)
-    legacy = bool(parsed and parsed <= (1, 12, 2))
-    if legacy:
-        for pattern in ("forge-*.jar",):
-            for path in sorted(server_dir.glob(pattern)):
-                if "installer" in path.name or "shim" in path.name:
-                    continue
-                memory = max(1, int(instance.memory_gb))
-                return [
-                    java,
-                    f"-Xms{min(memory, 2)}G",
-                    f"-Xmx{memory}G",
-                    "-jar",
-                    path.name,
-                    "nogui",
-                ]
+    marker = server_dir / ".minebox-forge-jar"
+    if marker.is_file():
+        named = marker.read_text(encoding="utf-8").strip()
+        if named and (server_dir / named).is_file():
+            return [
+                java,
+                f"-Xms{min(memory, 2)}G",
+                f"-Xmx{memory}G",
+                "-jar",
+                named,
+                "nogui",
+            ]
 
-    # Modern Forge without unix_args is incomplete — do not -jar (causes
-    # LaunchWrapper ClassCastException on the wrong jar).
+    # Legacy / mid Forge (1.12 and many 1.13-1.16 installs): launch the Forge jar,
+    # never vanilla server.jar (that reports brand "vanilla" in Minecraft).
+    if legacy_jar is not None:
+        return [
+            java,
+            f"-Xms{min(memory, 2)}G",
+            f"-Xmx{memory}G",
+            "-jar",
+            legacy_jar.name,
+            "nogui",
+        ]
+
     if run_sh.is_file():
         text = run_sh.read_text(encoding="utf-8", errors="ignore")
         match = re.search(r"@(\S*libraries/\S+/unix_args\.txt)", text)
@@ -362,18 +431,25 @@ def _forge_command(
             return ["/bin/bash", str(safe)]
 
     raise RuntimeError(
-        "This Forge install is missing libraries/.../unix_args.txt. "
-        "Create a new Forge 1.18+ server from setup (recommended on MineBox), "
-        "or reinstall Forge so the server libraries are complete."
+        "This Forge install is missing its Forge server jar / unix_args.txt. "
+        "Reinstall Forge from setup, or verify forge-*.jar exists in the server folder."
     )
 
 
 def _resolve_main_jar(server_dir: Path, instance: servers.ServerInstance) -> str:
+    legacy_jar = _find_legacy_forge_jar(server_dir, instance)
+    forge_installed = legacy_jar is not None or (
+        server_dir / "libraries" / "net" / "minecraftforge"
+    ).is_dir()
+
     configured = (instance.main_jar or "server.jar").strip()
     if configured.startswith("@"):
         candidate = server_dir / configured[1:]
         if candidate.is_file():
             return configured
+
+    if forge_installed and legacy_jar is not None:
+        return legacy_jar.name
 
     if configured and not configured.startswith("@") and (server_dir / configured).is_file():
         return configured
@@ -384,13 +460,6 @@ def _resolve_main_jar(server_dir: Path, instance: servers.ServerInstance) -> str
     ):
         if (server_dir / name).is_file():
             return name
-
-    for path in sorted(server_dir.glob("forge-*-shim.jar")):
-        return path.name
-    for path in sorted(server_dir.glob("forge-*.jar")):
-        if "installer" in path.name:
-            continue
-        return path.name
 
     raise RuntimeError(
         f"The active server '{instance.name}' does not have a launchable server jar."

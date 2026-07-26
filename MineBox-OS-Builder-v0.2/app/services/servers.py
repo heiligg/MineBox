@@ -233,6 +233,7 @@ def reserve_server(
 def update_server_launch(
     server_id: str,
     *,
+    loader: str | None = None,
     loader_version: str | None = None,
     main_jar: str | None = None,
 ) -> ServerInstance:
@@ -241,6 +242,8 @@ def update_server_launch(
     entry = registry["servers"].get(clean_id)
     if not isinstance(entry, dict):
         raise ServerManagerError(f"Server '{clean_id}' does not exist.")
+    if loader is not None:
+        entry["loader"] = normalize_loader(loader)
     if loader_version is not None:
         entry["loader_version"] = loader_version
     if main_jar is not None:

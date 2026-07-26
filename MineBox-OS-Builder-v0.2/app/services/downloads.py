@@ -546,21 +546,46 @@ def _install_forge(
             encoding="utf-8",
         )
     elif shim.is_file():
-        shutil.copy2(shim, server_dir / "server.jar")
-        main_jar = "server.jar"
+        main_jar = shim.name
+        (server_dir / ".minebox-forge-jar").write_text(shim.name + "\n", encoding="utf-8")
     elif plain.is_file():
-        shutil.copy2(plain, server_dir / "server.jar")
-        main_jar = "server.jar"
+        # Keep the Forge jar as the launch target. Do NOT replace server.jar —
+        # the installer often leaves a vanilla jar there, and launching that
+        # makes Minecraft report brand "vanilla".
+        main_jar = plain.name
+        (server_dir / ".minebox-forge-jar").write_text(plain.name + "\n", encoding="utf-8")
     elif universal.is_file():
-        shutil.copy2(universal, server_dir / "server.jar")
-        main_jar = "server.jar"
-    elif result.returncode != 0:
-        detail = (result.stderr or result.stdout or "Forge installer failed.").strip()
-        raise DownloadError(detail)
-    else:
-        raise DownloadError(
-            "Forge installed, but MineBox could not find a launchable server jar."
+        main_jar = universal.name
+        (server_dir / ".minebox-forge-jar").write_text(
+            universal.name + "\n", encoding="utf-8"
         )
+    else:
+        # Broader search for forge-*.jar after install.
+        candidates = [
+            path
+            for path in sorted(server_dir.glob(f"forge-{version_id}-*.jar"))
+            if "installer" not in path.name.lower()
+        ]
+        if not candidates:
+            candidates = [
+                path
+                for path in sorted(server_dir.glob("forge-*.jar"))
+                if "installer" not in path.name.lower()
+            ]
+        if candidates:
+            main_jar = candidates[0].name
+            (server_dir / ".minebox-forge-jar").write_text(
+                main_jar + "\n", encoding="utf-8"
+            )
+        elif result.returncode != 0:
+            detail = (
+                result.stderr or result.stdout or "Forge installer failed."
+            ).strip()
+            raise DownloadError(detail)
+        else:
+            raise DownloadError(
+                "Forge installed, but MineBox could not find a launchable Forge jar."
+            )
 
     # Official Forge launch files: keep run.sh executable and seed JVM memory args.
     run_sh = server_dir / "run.sh"
@@ -585,7 +610,11 @@ def _install_forge(
         "main_jar": main_jar,
         "file": str(
             server_dir
-            / ("server.jar" if not main_jar.startswith("@") else unix_args[0])
+            / (
+                unix_args[0]
+                if main_jar.startswith("@")
+                else main_jar
+            )
         ),
         "size_bytes": 0,
         "sha1": "",
