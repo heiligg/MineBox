@@ -453,7 +453,8 @@
                 cfKeyInput.value = "";
             }
             context.curseforge_configured = Boolean(payload.configured);
-            showMessage(payload.message || "Saved.", "success");
+            const type = payload.verified === false ? "warning" : "success";
+            showMessage(payload.message || "Saved.", type);
             await loadContext();
         } catch (error) {
             showMessage(

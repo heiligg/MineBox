@@ -114,15 +114,35 @@ def put_curseforge_key(body: CurseForgeKeyRequest) -> dict[str, Any]:
         return {
             "ok": True,
             "configured": False,
+            "verified": False,
             "message": "CurseForge API key cleared.",
         }
+    verified = True
+    warning: str | None = None
     try:
         mods.validate_curseforge_api_key(clean)
     except mods.ModsError as error:
-        raise _http_error(error) from error
+        # Still save so a rate-limited / temporarily rejected key can be retried
+        # later without re-pasting. Search will keep reporting clear CF errors.
+        verified = False
+        warning = str(error)
     mods.set_curseforge_api_key(clean)
+    if verified:
+        return {
+            "ok": True,
+            "configured": True,
+            "verified": True,
+            "message": "CurseForge API key verified and saved.",
+        }
     return {
         "ok": True,
         "configured": True,
-        "message": "CurseForge API key verified and saved.",
+        "verified": False,
+        "warning": warning,
+        "message": (
+            "CurseForge API key saved, but CurseForge did not accept it yet "
+            "(invalid or rate-limited). Modrinth and URL paste still work. "
+            "Try searching again later, or regenerate the key at "
+            "console.curseforge.com."
+        ),
     }

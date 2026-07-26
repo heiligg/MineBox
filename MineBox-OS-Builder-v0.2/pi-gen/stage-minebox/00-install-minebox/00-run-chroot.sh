@@ -42,12 +42,20 @@ app_subdir=MineBox-OS-Builder-v0.2/app
 CONF
 chmod 0644 /etc/minebox/updates.conf
 
-# Also allow Avahi install helpers used for minebox.local advertising.
+# Also allow Avahi install helpers used for minebox.local advertising,
+# Java bootstrap, TLS enable/disable, and API restarts for HTTPS.
 cat >/etc/sudoers.d/minebox <<'SUDOERS'
-minebox ALL=(root) NOPASSWD: /usr/bin/systemctl start minecraft.service, /usr/bin/systemctl stop minecraft.service, /usr/bin/systemctl restart minecraft.service, /usr/bin/systemctl start minebox-update.service, /usr/bin/systemctl stop hostapd.service, /usr/bin/systemctl start hostapd.service, /usr/bin/systemctl stop dnsmasq.service, /usr/bin/systemctl start dnsmasq.service, /usr/bin/systemctl enable avahi-daemon.service, /usr/bin/systemctl start avahi-daemon.service, /usr/bin/systemctl try-reload-or-restart avahi-daemon.service, /usr/bin/python3 /opt/minebox/scripts/minebox_fix_minecraft_perms.py, /usr/local/sbin/minebox-fix-minecraft-perms, /usr/bin/python3 /opt/minebox/scripts/minebox_install_avahi.py, /usr/local/sbin/minebox-install-avahi, /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot
+minebox ALL=(root) NOPASSWD: /usr/bin/systemctl start minecraft.service, /usr/bin/systemctl stop minecraft.service, /usr/bin/systemctl restart minecraft.service, /usr/bin/systemctl start minebox-update.service, /usr/bin/systemctl stop hostapd.service, /usr/bin/systemctl start hostapd.service, /usr/bin/systemctl stop dnsmasq.service, /usr/bin/systemctl start dnsmasq.service, /usr/bin/systemctl enable avahi-daemon.service, /usr/bin/systemctl start avahi-daemon.service, /usr/bin/systemctl try-reload-or-restart avahi-daemon.service, /usr/bin/python3 /opt/minebox/scripts/minebox_fix_minecraft_perms.py, /usr/local/sbin/minebox-fix-minecraft-perms, /usr/bin/python3 /opt/minebox/scripts/minebox_install_avahi.py, /usr/local/sbin/minebox-install-avahi, /usr/bin/python3 /opt/minebox/scripts/minebox_ensure_java.py, /usr/local/sbin/minebox-ensure-java, /usr/bin/python3 /opt/minebox/scripts/minebox_ensure_tls.py, /usr/bin/python3 /opt/minebox/scripts/minebox_ensure_tls.py *, /usr/local/sbin/minebox-ensure-tls, /usr/local/sbin/minebox-ensure-tls *, /usr/bin/systemctl restart minebox-api.service, /usr/bin/python3 /opt/minebox/scripts/minebox_fan_test.py *, /usr/local/sbin/minebox-fan-test *, /usr/bin/journalctl -u minecraft.service *, /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot
 SUDOERS
 chmod 0440 /etc/sudoers.d/minebox
 visudo -cf /etc/sudoers.d/minebox
+
+if [ -f /opt/minebox/scripts/minebox_ensure_tls.py ]; then
+  install -m 0755 /opt/minebox/scripts/minebox_ensure_tls.py /usr/local/sbin/minebox-ensure-tls
+fi
+if [ -f /opt/minebox/scripts/minebox_api_run.py ]; then
+  chmod 0755 /opt/minebox/scripts/minebox_api_run.py
+fi
 
 mkdir -p /var/lib/minebox /var/lib/minebox/updates /var/log/minebox
 chown -R minebox:minebox /var/lib/minebox /var/log/minebox
