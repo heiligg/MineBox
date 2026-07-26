@@ -563,13 +563,31 @@ def _install_forge(
             "Forge installed, but MineBox could not find a launchable server jar."
         )
 
+    # Official Forge launch files: keep run.sh executable and seed JVM memory args.
+    run_sh = server_dir / "run.sh"
+    if run_sh.is_file():
+        try:
+            os.chmod(run_sh, 0o755)
+        except OSError:
+            pass
+
+    user_jvm = server_dir / "user_jvm_args.txt"
+    if not user_jvm.is_file():
+        user_jvm.write_text(
+            "# JVM arguments for Forge\n-Xms2G\n-Xmx2G\n",
+            encoding="utf-8",
+        )
+
     return {
         "success": True,
         "loader": "forge",
         "version": version_id,
         "loader_version": forge_build,
         "main_jar": main_jar,
-        "file": str(server_dir / ("server.jar" if not main_jar.startswith("@") else unix_args[0])),
+        "file": str(
+            server_dir
+            / ("server.jar" if not main_jar.startswith("@") else unix_args[0])
+        ),
         "size_bytes": 0,
         "sha1": "",
     }

@@ -56,8 +56,14 @@ simulation-distance=10
 
 def write_start_script(instance: ServerInstance, server_dir: Path) -> None:
     main_jar = instance.main_jar or "server.jar"
-    if main_jar.startswith("@"):
-        launch = f'exec java -Xms{instance.memory_gb}G -Xmx{instance.memory_gb}G {main_jar} nogui'
+    run_sh = server_dir / "run.sh"
+    if (instance.loader or "").lower() in {"forge", "neoforge"} and run_sh.is_file():
+        launch = 'exec /bin/bash ./run.sh nogui'
+    elif main_jar.startswith("@"):
+        launch = (
+            f'exec java -Xms{instance.memory_gb}G -Xmx{instance.memory_gb}G '
+            f'@user_jvm_args.txt {main_jar} nogui'
+        )
     else:
         launch = (
             f'exec java -Xms{instance.memory_gb}G -Xmx{instance.memory_gb}G '

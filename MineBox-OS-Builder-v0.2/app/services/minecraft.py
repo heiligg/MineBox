@@ -118,7 +118,7 @@ def _dev_start() -> CommandResult:
     try:
         from services.launcher import build_command
 
-        server_dir, command = build_command()
+        server_dir, command = build_command()[:2]
     except Exception as error:
         return CommandResult(False, stderr=str(error))
 
@@ -195,18 +195,115 @@ def _dev_stop() -> CommandResult:
     return CommandResult(True, "Minecraft stopped.")
 
 
+def _recent_failure_hint() -> str:
+    """Best-effort crash reason from launcher log, latest.log, or journal."""
+    hints: list[str] = []
+    server_dir = _active_server_dir()
+    if server_dir is not None:
+        for relative in (
+            "logs/minebox-launcher.log",
+            "logs/latest.log",
+        ):
+            path = server_dir / relative
+            if not path.is_file():
+                continue
+            try:
+                lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            except OSError:
+                continue
+            useful = [
+                line.strip()
+                for line in lines[-40:]
+                if line.strip()
+                and not line.strip().startswith("#")
+            ]
+            for line in reversed(useful):
+                lower = line.lower()
+                if any(
+                    token in lower
+                    for token in (
+                        "error",
+                        "exception",
+                        "unsupportedclassversion",
+                        "outofmemory",
+                        "could not find or load",
+                        "unable to access jarfile",
+                        "minebox launcher",
+                        "failed",
+                    )
+                ):
+                    hints.append(line[:240])
+                    break
+
+    journal = run(
+        [
+            "journalctl",
+            "-u",
+            SERVICE_NAME,
+            "-n",
+            "40",
+            "--no-pager",
+            "-o",
+            "cat",
+        ],
+        timeout=15,
+    )
+    if journal.ok and journal.stdout:
+        for line in reversed(journal.stdout.splitlines()):
+            lower = line.lower()
+            if any(
+                token in lower
+                for token in (
+                    "error",
+                    "exception",
+                    "unsupportedclassversion",
+                    "outofmemory",
+                    "failed",
+                    "minebox launcher",
+                )
+            ):
+                hints.append(line.strip()[:240])
+                break
+
+    if not hints:
+        return ""
+    # Deduplicate while preserving order.
+    unique: list[str] = []
+    for item in hints:
+        if item not in unique:
+            unique.append(item)
+    return " Last error: " + " | ".join(unique[:2])
+
+
 def start() -> CommandResult:
     if is_running():
         return CommandResult(True, "Minecraft is already running.")
     if _dev_mode():
         return _dev_start()
     result = _service("start")
-    if result.ok and not wait_for_state(True):
+    if not result.ok:
+        return CommandResult(
+            False,
+            stderr=(result.stderr or result.stdout or "Start failed.")
+            + _recent_failure_hint(),
+        )
+    if not wait_for_state(True, timeout=30):
         return CommandResult(
             False,
             stderr=(
                 "The service command succeeded, but Minecraft did not "
                 "become active within 30 seconds."
+                + _recent_failure_hint()
+            ),
+        )
+    # Catch immediate crash/exit after systemd reports active.
+    time.sleep(3)
+    if not is_running():
+        return CommandResult(
+            False,
+            stderr=(
+                "Minecraft started, then exited immediately."
+                + _recent_failure_hint()
             ),
         )
     return result
