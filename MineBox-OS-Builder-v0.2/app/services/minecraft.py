@@ -220,9 +220,8 @@ def save_world() -> CommandResult:
 def stop() -> CommandResult:
     if not is_running():
         return CommandResult(True, "Minecraft is already offline.")
-    saved = save_world()
-    if not saved.ok:
-        return saved
+    # Best-effort flush; do not block stop if RCON is misconfigured.
+    save_world()
     if _dev_mode():
         return _dev_stop()
     result = _service("stop")
@@ -236,9 +235,7 @@ def stop() -> CommandResult:
 
 def restart() -> CommandResult:
     if is_running():
-        saved = save_world()
-        if not saved.ok:
-            return saved
+        save_world()
     if _dev_mode():
         stopped = _dev_stop() if is_running() else CommandResult(True)
         if not stopped.ok:
@@ -334,6 +331,46 @@ def recent_logs(count: int = 20) -> list[str]:
         return [f"Unable to read log: {exc}"]
 
 
+_SETTINGS_BOOLEAN_KEYS = {
+    "online-mode",
+    "pvp",
+    "white-list",
+    "allow-flight",
+    "enable-command-block",
+    "force-gamemode",
+}
+
+_SETTINGS_INTEGER_KEYS = {
+    "max-players",
+    "view-distance",
+    "simulation-distance",
+    "server-port",
+    "player-idle-timeout",
+}
+
+_SETTINGS_SELECT_KEYS = {
+    "gamemode": {"survival", "creative", "adventure", "spectator"},
+    "difficulty": {"peaceful", "easy", "normal", "hard"},
+}
+
+_SETTINGS_KEYS = (
+    "motd",
+    "max-players",
+    "gamemode",
+    "difficulty",
+    "view-distance",
+    "simulation-distance",
+    "server-port",
+    "player-idle-timeout",
+    "online-mode",
+    "pvp",
+    "white-list",
+    "allow-flight",
+    "enable-command-block",
+    "force-gamemode",
+)
+
+
 def read_properties() -> tuple[dict[str, str], str | None]:
     props: dict[str, str] = {}
     try:
@@ -345,6 +382,195 @@ def read_properties() -> tuple[dict[str, str], str | None]:
         return props, None
     except OSError as exc:
         return {}, str(exc)
+
+
+def _parse_bool(value: str | bool | None, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"true", "1", "yes", "on"}
+
+
+def _format_setting_value(key: str, value: object) -> str:
+    if key in _SETTINGS_BOOLEAN_KEYS:
+        return "true" if _parse_bool(value) else "false"
+    if key in _SETTINGS_INTEGER_KEYS:
+        return str(int(value))  # type: ignore[arg-type]
+    return str(value).strip()
+
+
+def _normalize_settings(raw: dict[str, str]) -> dict[str, object]:
+    """Convert server.properties strings into JSON-friendly values for the UI."""
+    defaults: dict[str, object] = {
+        "motd": "MineBox Minecraft Server",
+        "max-players": 20,
+        "gamemode": "survival",
+        "difficulty": "peaceful",
+        "view-distance": 10,
+        "simulation-distance": 10,
+        "server-port": 25565,
+        "player-idle-timeout": 0,
+        "online-mode": True,
+        "pvp": True,
+        "white-list": False,
+        "allow-flight": False,
+        "enable-command-block": False,
+        "force-gamemode": False,
+    }
+    settings = dict(defaults)
+    for key in _SETTINGS_KEYS:
+        if key not in raw:
+            continue
+        value = raw[key]
+        if key in _SETTINGS_BOOLEAN_KEYS:
+            settings[key] = _parse_bool(value, bool(defaults[key]))
+        elif key in _SETTINGS_INTEGER_KEYS:
+            try:
+                settings[key] = int(str(value).strip())
+            except ValueError:
+                settings[key] = defaults[key]
+        else:
+            settings[key] = value
+    return settings
+
+
+def read_server_settings() -> dict[str, object]:
+    """API payload for GET /api/v1/minecraft/settings."""
+    properties_path = _server_properties()
+    props, error = read_properties()
+    if error:
+        return {
+            "ok": False,
+            "message": f"Unable to read server.properties: {error}",
+            "path": str(properties_path),
+            "settings": {},
+        }
+    return {
+        "ok": True,
+        "message": "Server settings loaded.",
+        "path": str(properties_path),
+        "settings": _normalize_settings(props),
+        "restart_required": True,
+    }
+
+
+def _validate_settings_payload(
+    settings: dict[str, object],
+) -> dict[str, str]:
+    errors: dict[str, str] = {}
+    for key in _SETTINGS_KEYS:
+        if key not in settings:
+            continue
+        value = settings[key]
+        if key in _SETTINGS_BOOLEAN_KEYS:
+            if not isinstance(value, bool) and str(value).lower() not in {
+                "true",
+                "false",
+                "1",
+                "0",
+                "yes",
+                "no",
+                "on",
+                "off",
+            }:
+                errors[key] = "Must be true or false."
+            continue
+        if key in _SETTINGS_INTEGER_KEYS:
+            try:
+                number = int(value)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                errors[key] = "Must be a whole number."
+                continue
+            ranges = {
+                "max-players": (1, 1000),
+                "view-distance": (2, 32),
+                "simulation-distance": (2, 32),
+                "server-port": (1024, 65535),
+                "player-idle-timeout": (0, 1440),
+            }
+            low, high = ranges[key]
+            if number < low or number > high:
+                errors[key] = f"Must be between {low} and {high}."
+            continue
+        if key in _SETTINGS_SELECT_KEYS:
+            allowed = _SETTINGS_SELECT_KEYS[key]
+            if str(value).strip().lower() not in allowed:
+                errors[key] = f"Must be one of: {', '.join(sorted(allowed))}."
+            continue
+        if key == "motd":
+            text = str(value).strip()
+            if not text:
+                errors[key] = "MOTD cannot be empty."
+            elif len(text) > 120:
+                errors[key] = "MOTD must be 120 characters or fewer."
+    return errors
+
+
+def save_server_settings(payload: dict[str, object]) -> dict[str, object]:
+    """API payload for PUT /api/v1/minecraft/settings."""
+    raw_settings = payload.get("settings", payload)
+    if not isinstance(raw_settings, dict):
+        return {
+            "ok": False,
+            "status_code": 400,
+            "message": "Settings payload must be an object.",
+            "settings": {},
+        }
+
+    errors = _validate_settings_payload(raw_settings)
+    if errors:
+        return {
+            "ok": False,
+            "status_code": 400,
+            "message": "Correct the highlighted settings before saving.",
+            "errors": errors,
+            "settings": raw_settings,
+        }
+
+    properties_path = _server_properties()
+    if not properties_path.is_file():
+        return {
+            "ok": False,
+            "status_code": 500,
+            "message": f"server.properties was not found at {properties_path}.",
+            "path": str(properties_path),
+            "settings": {},
+        }
+
+    updated: dict[str, object] = {}
+    for key in _SETTINGS_KEYS:
+        if key not in raw_settings:
+            continue
+        value = _format_setting_value(key, raw_settings[key])
+        if key in _SETTINGS_SELECT_KEYS:
+            value = value.lower()
+        result = update_property(key, value)
+        if not result.ok:
+            return {
+                "ok": False,
+                "status_code": 500,
+                "message": result.stderr or f"Could not update {key}.",
+                "path": str(properties_path),
+                "settings": {},
+            }
+        if key in _SETTINGS_BOOLEAN_KEYS:
+            updated[key] = _parse_bool(value)
+        elif key in _SETTINGS_INTEGER_KEYS:
+            updated[key] = int(value)
+        else:
+            updated[key] = value
+
+    current = read_server_settings()
+    return {
+        "ok": True,
+        "message": (
+            "Server settings saved. Restart Minecraft to apply the changes."
+        ),
+        "path": str(properties_path),
+        "settings": current.get("settings", updated),
+        "restart_required": True,
+    }
 
 
 def update_property(key: str, value: str) -> CommandResult:

@@ -447,7 +447,6 @@ def install_update() -> dict[str, Any]:
             "-n",
             "/usr/bin/systemctl",
             "start",
-            "--no-block",
             "minebox-update.service",
         ],
         check=False,

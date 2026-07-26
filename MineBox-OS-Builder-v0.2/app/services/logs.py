@@ -1,13 +1,23 @@
 import os
 from pathlib import Path
 
+from services import servers
+
 
 DEFAULT_LOG_PATHS = (
     Path("/opt/minecraft/logs/latest.log"),
+    Path("/opt/minecraft/server/logs/latest.log"),
     Path("/srv/minecraft/logs/latest.log"),
     Path("/home/minecraft/server/logs/latest.log"),
     Path("/var/lib/minecraft/logs/latest.log"),
 )
+
+
+def _path_is_file(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except OSError:
+        return False
 
 
 def minecraft_log_path() -> Path | None:
@@ -15,12 +25,17 @@ def minecraft_log_path() -> Path | None:
 
     if configured_path:
         path = Path(configured_path).expanduser()
-
-        if path.is_file():
+        if _path_is_file(path):
             return path
 
+    active = servers.active_server()
+    if active is not None:
+        active_log = Path(active.directory) / "logs" / "latest.log"
+        if _path_is_file(active_log):
+            return active_log
+
     for path in DEFAULT_LOG_PATHS:
-        if path.is_file():
+        if _path_is_file(path):
             return path
 
     return None
