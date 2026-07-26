@@ -1,6 +1,6 @@
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from services import minecraft
 from services import monitoring
@@ -46,4 +46,17 @@ def get_status() -> dict[str, Any]:
         "ok": True,
         "system": monitoring.system_status(),
         "minecraft": minecraft_status(),
+    }
+
+
+@router.post("/system/fan-test")
+def post_fan_test() -> dict[str, Any]:
+    try:
+        result = monitoring.run_fan_test(duration_seconds=8)
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
+    return {
+        "ok": True,
+        **result,
+        "system": monitoring.system_status(),
     }

@@ -361,6 +361,19 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
             timeout=900,
         )
 
+    fan_script = target / "scripts" / "minebox_fan_test.py"
+    if fan_script.is_file():
+        run(["chmod", "0755", str(fan_script)])
+        run(
+            [
+                "install",
+                "-m",
+                "0755",
+                str(fan_script),
+                "/usr/local/sbin/minebox-fan-test",
+            ]
+        )
+
     # Allow the dashboard user to read live Minecraft service logs.
     subprocess.run(
         ["usermod", "-aG", "systemd-journal", "minebox"],
@@ -417,6 +430,8 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
         "/usr/local/sbin/minebox-install-avahi, "
         "/usr/bin/python3 /opt/minebox/scripts/minebox_ensure_java.py, "
         "/usr/local/sbin/minebox-ensure-java, "
+        "/usr/bin/python3 /opt/minebox/scripts/minebox_fan_test.py, "
+        "/usr/local/sbin/minebox-fan-test, "
         "/usr/bin/journalctl -u minecraft.service *, "
         "/usr/bin/systemctl poweroff, "
         "/usr/bin/systemctl reboot\n"

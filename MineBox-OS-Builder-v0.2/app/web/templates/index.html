@@ -752,6 +752,35 @@
             opacity: 0.65;
         }
 
+        .fan-detail {
+            margin-top: -2px;
+        }
+
+        .fan-test-button {
+            flex-shrink: 0;
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text, #e8eef7);
+            cursor: pointer;
+            font: inherit;
+            font-size: 0.75rem;
+            font-weight: 700;
+            padding: 6px 10px;
+        }
+
+        .fan-test-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .fan-hint {
+            margin: 0 0 10px;
+            color: var(--muted, #8e9bad);
+            font-size: 0.72rem;
+            line-height: 1.35;
+        }
+
         .summary-row strong {
             overflow-wrap: anywhere;
             text-align: right;
@@ -1549,6 +1578,25 @@
                             </span>
                         </div>
 
+                        <div class="resource-detail fan-detail">
+                            <span id="fan-value">
+                                Fan: checking…
+                            </span>
+
+                            <button
+                                type="button"
+                                class="ghost-button fan-test-button"
+                                id="fan-test-button"
+                                title="Spin the Active Cooler at full speed for a few seconds"
+                            >
+                                Test fan
+                            </button>
+                        </div>
+
+                        <p class="fan-hint" id="fan-hint">
+                            Official Pi 5 cooler may stay off below ~50°C.
+                        </p>
+
                         <div
                             class="meter"
                             role="progressbar"
@@ -2092,6 +2140,12 @@
         const temperatureValue =
             document.getElementById("temperature-value");
 
+        const fanValue =
+            document.getElementById("fan-value");
+
+        const fanTestButton =
+            document.getElementById("fan-test-button");
+
         const cpuMeter =
             document.getElementById("cpu-meter");
 
@@ -2340,6 +2394,35 @@
                 temperatureValue.classList.remove(
                     "system-value-unavailable"
                 );
+            }
+
+            if (fanValue) {
+                const fanStatus = system.fan_status;
+                if (
+                    !system.fan_available ||
+                    fanStatus === "unavailable"
+                ) {
+                    fanValue.textContent =
+                        "Fan: not detected";
+                    fanValue.classList.add(
+                        "system-value-unavailable"
+                    );
+                } else if (fanStatus === "spinning") {
+                    const rpm = system.fan_rpm;
+                    fanValue.textContent =
+                        typeof rpm === "number" && rpm > 0
+                            ? `Fan: ${Math.round(rpm)} RPM`
+                            : "Fan: spinning";
+                    fanValue.classList.remove(
+                        "system-value-unavailable"
+                    );
+                } else {
+                    fanValue.textContent =
+                        "Fan: idle (cool)";
+                    fanValue.classList.remove(
+                        "system-value-unavailable"
+                    );
+                }
             }
 
             memoryValue.textContent =
@@ -3411,6 +3494,69 @@
             createWorldBackup
         );
 
+        if (fanTestButton) {
+            fanTestButton.addEventListener(
+                "click",
+                async () => {
+                    fanTestButton.disabled = true;
+                    const previous =
+                        fanTestButton.textContent;
+                    fanTestButton.textContent =
+                        "Testing…";
+                    showActionMessage(
+                        "Spinning the cooler at full speed…"
+                    );
+
+                    try {
+                        const response = await fetch(
+                            "/api/v1/system/fan-test",
+                            {
+                                method: "POST",
+                                credentials: "same-origin",
+                                headers: {
+                                    Accept: "application/json"
+                                }
+                            }
+                        );
+                        const payload =
+                            await response.json().catch(
+                                () => ({})
+                            );
+                        if (!response.ok) {
+                            const detail =
+                                payload.detail ||
+                                payload.message ||
+                                "Fan test failed.";
+                            throw new Error(
+                                typeof detail === "string"
+                                    ? detail
+                                    : "Fan test failed."
+                            );
+                        }
+                        showActionMessage(
+                            payload.message ||
+                                "Fan test finished.",
+                            "success"
+                        );
+                        if (payload.system) {
+                            // refreshStatus will pick up next poll
+                        }
+                        await refreshStatus();
+                    } catch (error) {
+                        showActionMessage(
+                            error.message ||
+                                "Fan test failed.",
+                            "error"
+                        );
+                    } finally {
+                        fanTestButton.disabled = false;
+                        fanTestButton.textContent =
+                            previous;
+                    }
+                }
+            );
+        }
+
         refreshBackups(true);
 
         window.setInterval(
@@ -3454,5 +3600,6 @@
 <script src="/static/js/settings.js"></script>
 <script src="/static/js/network.js"></script>
 <script src="/static/js/join.js"></script>
+<script src="/static/js/files.js"></script>
 </body>
 </html>

@@ -7,6 +7,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from api.routes import backups
 from api.routes import console_command
+from api.routes import files as files_routes
 from api.routes import join
 from api.routes import network
 from api.routes import update
@@ -63,6 +64,7 @@ app.include_router(setup_router)
 app.include_router(servers_router)
 app.include_router(console_command.router)
 app.include_router(backups.router)
+app.include_router(files_routes.router)
 app.include_router(network.router)
 app.include_router(update.router)
 app.include_router(join.router)

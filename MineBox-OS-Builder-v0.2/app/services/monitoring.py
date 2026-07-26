@@ -195,10 +195,192 @@ def _cpu_temperature_c() -> float | None:
     return None
 
 
+def _read_sysfs_int(path: Path) -> int | None:
+    try:
+        return int(path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _hwmon_fan_nodes() -> list[Path]:
+    nodes: list[Path] = []
+    platform_fan = Path("/sys/devices/platform/cooling_fan")
+    if platform_fan.is_dir():
+        nodes.extend(sorted(platform_fan.glob("hwmon/hwmon*")))
+    class_hwmon = Path("/sys/class/hwmon")
+    if class_hwmon.is_dir():
+        for hwmon in sorted(class_hwmon.glob("hwmon*")):
+            if hwmon in nodes:
+                continue
+            name_path = hwmon / "name"
+            try:
+                name = (
+                    name_path.read_text(encoding="utf-8").strip().lower()
+                    if name_path.is_file()
+                    else ""
+                )
+            except OSError:
+                name = ""
+            if "fan" in name or (hwmon / "fan1_input").is_file():
+                nodes.append(hwmon)
+    return nodes
+
+
+def _cooling_fan_devices() -> list[Path]:
+    thermal = Path("/sys/class/thermal")
+    if not thermal.is_dir():
+        return []
+    devices: list[Path] = []
+    for device in sorted(thermal.glob("cooling_device*")):
+        type_path = device / "type"
+        try:
+            dtype = (
+                type_path.read_text(encoding="utf-8").strip().lower()
+                if type_path.is_file()
+                else ""
+            )
+        except OSError:
+            dtype = ""
+        if "fan" in dtype:
+            devices.append(device)
+    return devices
+
+
+def fan_status() -> dict[str, float | int | str | bool | None]:
+    """Read Pi 5 Active Cooler / firmware fan state from sysfs."""
+    rpm: int | None = None
+    pwm: int | None = None
+    state: int | None = None
+    max_state: int | None = None
+    available = False
+
+    for hwmon in _hwmon_fan_nodes():
+        fan_input = hwmon / "fan1_input"
+        if fan_input.is_file():
+            available = True
+            value = _read_sysfs_int(fan_input)
+            if value is not None:
+                rpm = value
+        pwm_path = hwmon / "pwm1"
+        if pwm_path.is_file():
+            available = True
+            value = _read_sysfs_int(pwm_path)
+            if value is not None:
+                pwm = value
+        if rpm is not None or pwm is not None:
+            break
+
+    for device in _cooling_fan_devices():
+        available = True
+        state = _read_sysfs_int(device / "cur_state")
+        max_state = _read_sysfs_int(device / "max_state")
+        break
+
+    if not available:
+        status = "unavailable"
+    elif (
+        (rpm is not None and rpm > 0)
+        or (pwm is not None and pwm > 0)
+        or (state is not None and state > 0)
+    ):
+        status = "spinning"
+    else:
+        status = "off"
+
+    return {
+        "fan_available": available,
+        "fan_rpm": rpm,
+        "fan_pwm": pwm,
+        "fan_state": state,
+        "fan_max_state": max_state,
+        "fan_status": status,
+    }
+
+
+def run_fan_test(duration_seconds: int = 8) -> dict[str, float | int | str | bool | None]:
+    """Force the cooler to max briefly so users can verify hardware."""
+    import subprocess
+
+    duration_seconds = max(3, min(int(duration_seconds), 20))
+    before = fan_status()
+    if not before.get("fan_available"):
+        raise RuntimeError(
+            "No cooling fan was detected. Check that the Active Cooler "
+            "is seated on the Pi 5 fan connector."
+        )
+
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "minebox_fan_test.py"
+    )
+    commands = [
+        [
+            "sudo",
+            "-n",
+            "/usr/local/sbin/minebox-fan-test",
+            "--seconds",
+            str(duration_seconds),
+        ],
+        [
+            "sudo",
+            "-n",
+            "/usr/bin/python3",
+            str(script),
+            "--seconds",
+            str(duration_seconds),
+        ],
+        [
+            "/usr/bin/python3",
+            str(script),
+            "--seconds",
+            str(duration_seconds),
+        ],
+    ]
+
+    last_error = "Fan test failed."
+    ran = False
+    for command in commands:
+        if "minebox_fan_test.py" in command[-3:] and not script.is_file():
+            continue
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=duration_seconds + 15,
+            )
+        except (OSError, subprocess.SubprocessError) as error:
+            last_error = str(error)
+            continue
+        if result.returncode == 0:
+            ran = True
+            break
+        detail = (result.stderr or result.stdout or "").strip()
+        last_error = detail or f"Command failed ({result.returncode})."
+
+    if not ran:
+        raise RuntimeError(last_error)
+
+    after = fan_status()
+    return {
+        "ok": True,
+        "message": (
+            "Fan test finished. The cooler should have spun at full speed "
+            "for a few seconds. If you heard nothing, reseat the Active "
+            "Cooler cable on the Pi 5 fan header."
+        ),
+        "before": before,
+        "after": after,
+        "duration_seconds": duration_seconds,
+        **after,
+    }
+
+
 def system_status() -> dict[str, float | str | None]:
     """API-friendly system snapshot used by /api/v1/status."""
     sample_item = sample()
-
     memory_total_mb = 0.0
     memory_available_mb = 0.0
     memory_used_mb = 0.0
@@ -238,6 +420,8 @@ def system_status() -> dict[str, float | str | None]:
     if temperature_c is not None:
         temperature_text = f"{temperature_c:.1f} C"
 
+    fan = fan_status()
+
     return {
         "cpu_percent": sample_item.cpu,
         "memory_percent": sample_item.memory,
@@ -259,6 +443,7 @@ def system_status() -> dict[str, float | str | None]:
         "architecture": platform.machine() or None,
         "server_memory_mb": minecraft_memory,
         "minecraft_memory_mb": minecraft_memory,
+        **fan,
     }
 
 
