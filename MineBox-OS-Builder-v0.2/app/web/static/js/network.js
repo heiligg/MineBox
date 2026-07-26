@@ -602,18 +602,18 @@
 
         statusGrid.append(
             createStatusCard("Connection", "network-connection"),
-            createStatusCard("Wi-Fi network", "network-ssid"),
+            createStatusCard("Network", "network-ssid"),
             createStatusCard("IP address", "network-ip"),
             createStatusCard("Hostname", "network-hostname"),
             createStatusCard("Signal", "network-signal-value"),
             createStatusCard("Security", "network-security"),
             createStatusCard("Gateway", "network-gateway"),
-            createStatusCard("Wi-Fi adapter", "network-interface")
+            createStatusCard("Adapter", "network-interface")
         );
 
         const connectionSection = createSection(
             "Current connection",
-            "View or disconnect the current wireless connection."
+            "Ethernet stays online while the setup hotspot uses Wi-Fi. Disconnect only applies to a Wi-Fi client connection."
         );
 
         const connectionActions =
@@ -875,23 +875,54 @@
         const wifiAvailable =
             Boolean(network.wifi_available);
 
+        const ethernet = network.ethernet || {};
+        const wifi = network.wifi || {};
+        const hotspot = network.hotspot || {};
+
         const hotspotActive =
-            Boolean(network.hotspot_active);
+            Boolean(network.hotspot_active || hotspot.active);
+
+        const ethernetConnected =
+            Boolean(ethernet.connected);
+
+        const wifiConnected =
+            Boolean(wifi.connected);
+
+        const connectionType =
+            network.connection_type || null;
 
         let connectionText = "Disconnected";
         let connectionClass = "offline";
 
-        if (!available) {
+        if (!available && !ethernetConnected && !hotspotActive) {
             connectionText = "NetworkManager unavailable";
-        } else if (!wifiAvailable) {
-            connectionText = "No Wi-Fi adapter";
-        } else if (hotspotActive) {
-            connectionText = "Hotspot active";
-            connectionClass = "warning";
-        } else if (network.connected) {
-            connectionText = "Connected";
+        } else if (ethernetConnected && hotspotActive) {
+            connectionText = "Ethernet · Setup hotspot on";
             connectionClass = "online";
+        } else if (ethernetConnected) {
+            connectionText = "Ethernet connected";
+            connectionClass = "online";
+        } else if (wifiConnected) {
+            connectionText = "Wi-Fi connected";
+            connectionClass = "online";
+        } else if (hotspotActive) {
+            connectionText = "Setup hotspot active";
+            connectionClass = "warning";
+        } else if (!wifiAvailable && !ethernet.available) {
+            connectionText = "No network adapters";
         }
+
+        const networkName =
+            network.display_name ||
+            (
+                connectionType === "ethernet"
+                    ? (ethernet.connection_name || "Ethernet")
+                    : connectionType === "wifi"
+                        ? (network.ssid || wifi.ssid || "Wi-Fi")
+                        : connectionType === "hotspot"
+                            ? (hotspot.ssid || "MineBox-Setup")
+                            : "Not connected"
+            );
 
         setText(
             "network-connection",
@@ -901,15 +932,15 @@
 
         setText(
             "network-ssid",
-            network.ssid ||
-                network.connection_name ||
-                "Not connected"
+            networkName
         );
 
         setText(
             "network-ip",
             network.ip_address ||
-                (hotspotActive ? "192.168.4.1" : "Unavailable")
+                ethernet.ip_address ||
+                wifi.ip_address ||
+                (hotspotActive ? (hotspot.address || "192.168.4.1") : null)
         );
 
         setText(
@@ -919,33 +950,58 @@
                 "minebox.local"
         );
 
-        setText(
-            "network-signal-value",
+        if (
+            connectionType === "wifi" &&
             network.signal !== null &&
             network.signal !== undefined
-                ? `${network.signal}%`
-                : "Unavailable"
-        );
+        ) {
+            setText(
+                "network-signal-value",
+                `${network.signal}%`
+            );
+        } else {
+            setText(
+                "network-signal-value",
+                connectionType === "ethernet"
+                    ? "Wired"
+                    : connectionType === "hotspot"
+                        ? "Hotspot"
+                        : "—"
+            );
+        }
 
         setText(
             "network-security",
-            network.security || "Unavailable"
+            network.security ||
+                (
+                    connectionType === "ethernet"
+                        ? "Ethernet"
+                        : connectionType === "hotspot"
+                            ? "WPA2 hotspot"
+                            : "—"
+                )
         );
 
         setText(
             "network-gateway",
-            network.gateway || "Unavailable"
+            network.gateway ||
+                ethernet.gateway ||
+                wifi.gateway ||
+                "—"
         );
 
         setText(
             "network-interface",
-            network.interface || "Not detected"
+            network.interface ||
+                ethernet.interface ||
+                network.wifi_interface ||
+                wifi.interface ||
+                "Not detected"
         );
 
         disconnectButton.disabled =
             requestRunning ||
-            !network.connected ||
-            hotspotActive;
+            !wifiConnected;
 
         hotspotStartButton.disabled =
             requestRunning ||
@@ -955,6 +1011,12 @@
         hotspotStopButton.disabled =
             requestRunning ||
             !hotspotActive;
+
+        if (network.wifi_scan_blocked_reason) {
+            scanButton.title = network.wifi_scan_blocked_reason;
+        } else {
+            scanButton.title = "";
+        }
 
         statusNote.textContent =
             `Updated · ${new Date().toLocaleTimeString(
@@ -1056,12 +1118,15 @@
         return row;
     }
 
-    function renderWifiNetworks(networks) {
+    function renderWifiNetworks(networks, emptyMessage) {
         wifiList.replaceChildren();
 
         if (!Array.isArray(networks) || !networks.length) {
             wifiList.innerHTML =
-                '<div class="network-empty">No Wi-Fi networks were found. The development VM may not have direct access to a Wi-Fi adapter.</div>';
+                `<div class="network-empty">${
+                    emptyMessage ||
+                    "No nearby Wi-Fi networks were found."
+                }</div>`;
 
             return;
         }
@@ -1309,7 +1374,10 @@
             );
 
             const data = await parseResponse(response);
-            renderWifiNetworks(data.networks || []);
+            renderWifiNetworks(
+                data.networks || [],
+                data.message || "No nearby Wi-Fi networks were found."
+            );
         } catch (error) {
             wifiList.innerHTML =
                 `<div class="network-empty">${

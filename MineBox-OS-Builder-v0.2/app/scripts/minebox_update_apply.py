@@ -315,6 +315,10 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
         "/usr/bin/systemctl stop minecraft.service, "
         "/usr/bin/systemctl restart minecraft.service, "
         "/usr/bin/systemctl start minebox-update.service, "
+        "/usr/bin/systemctl stop hostapd.service, "
+        "/usr/bin/systemctl start hostapd.service, "
+        "/usr/bin/systemctl stop dnsmasq.service, "
+        "/usr/bin/systemctl start dnsmasq.service, "
         "/usr/bin/python3 /opt/minebox/scripts/minebox_fix_minecraft_perms.py, "
         "/usr/local/sbin/minebox-fix-minecraft-perms, "
         "/usr/bin/systemctl poweroff, "
@@ -324,7 +328,10 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
         current = sudoers.read_text(encoding="utf-8") if sudoers.is_file() else ""
     except OSError:
         current = ""
-    if "minebox_fix_minecraft_perms" not in current:
+    if (
+        "minebox_fix_minecraft_perms" not in current
+        or "hostapd.service" not in current
+    ):
         sudoers.write_text(desired, encoding="utf-8")
         os.chmod(sudoers, 0o440)
         subprocess.run(

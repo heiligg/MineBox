@@ -43,7 +43,7 @@ CONF
 chmod 0644 /etc/minebox/updates.conf
 
 cat >/etc/sudoers.d/minebox <<'SUDOERS'
-minebox ALL=(root) NOPASSWD: /usr/bin/systemctl start minecraft.service, /usr/bin/systemctl stop minecraft.service, /usr/bin/systemctl restart minecraft.service, /usr/bin/systemctl start minebox-update.service, /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot
+minebox ALL=(root) NOPASSWD: /usr/bin/systemctl start minecraft.service, /usr/bin/systemctl stop minecraft.service, /usr/bin/systemctl restart minecraft.service, /usr/bin/systemctl start minebox-update.service, /usr/bin/systemctl stop hostapd.service, /usr/bin/systemctl start hostapd.service, /usr/bin/systemctl stop dnsmasq.service, /usr/bin/systemctl start dnsmasq.service, /usr/bin/python3 /opt/minebox/scripts/minebox_fix_minecraft_perms.py, /usr/local/sbin/minebox-fix-minecraft-perms, /usr/bin/systemctl poweroff, /usr/bin/systemctl reboot
 SUDOERS
 chmod 0440 /etc/sudoers.d/minebox
 visudo -cf /etc/sudoers.d/minebox

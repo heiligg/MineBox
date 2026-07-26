@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import socket
+from pathlib import Path
 from typing import Any
 
 from services.system import CommandResult, run
@@ -130,7 +131,7 @@ def wifi_interface() -> str | None:
     Return the preferred Wi-Fi interface.
 
     A connected interface is preferred. Otherwise, return the first
-    available Wi-Fi device.
+    available Wi-Fi device, including adapters NetworkManager does not manage.
     """
 
     devices = _wifi_devices()
@@ -145,7 +146,23 @@ def wifi_interface() -> str | None:
     if devices:
         return devices[0]["device"]
 
-    return None
+    physical = _physical_wifi_interfaces()
+    return physical[0] if physical else None
+
+
+def _physical_wifi_interfaces() -> list[str]:
+    """Return Wi-Fi interface names from sysfs (works even when unmanaged)."""
+    net = Path("/sys/class/net")
+    if not net.is_dir():
+        return []
+    interfaces: list[str] = []
+    try:
+        for entry in sorted(net.iterdir()):
+            if (entry / "wireless").is_dir() or (entry / "phy80211").exists():
+                interfaces.append(entry.name)
+    except OSError:
+        return []
+    return interfaces
 
 
 def _hostname() -> str:
@@ -462,13 +479,20 @@ def status() -> dict[str, Any]:
         wifi_dns = _device_dns(wifi_iface)
 
     hotspot_active = hotspot_is_active() or _hostapd_hotspot_active()
+    hostapd_hotspot = _hostapd_hotspot_active()
+    physical_wifi = _physical_wifi_interfaces()
+    wifi_hardware_available = wifi_iface is not None or bool(physical_wifi)
+    if wifi_iface is None and physical_wifi:
+        wifi_iface = physical_wifi[0]
 
-    if hotspot_active:
-        connection_type = "hotspot"
-    elif ethernet_connected:
+    # Prefer the LAN uplink for "connected" reporting. Setup hotspot can run
+    # at the same time on wlan0 without replacing ethernet.
+    if ethernet_connected:
         connection_type = "ethernet"
-    elif wifi_connected:
+    elif wifi_connected and not hotspot_active:
         connection_type = "wifi"
+    elif hotspot_active:
+        connection_type = "hotspot"
     else:
         connection_type = None
 
@@ -479,27 +503,72 @@ def status() -> dict[str, Any]:
     if ethernet_iface and ethernet_connected:
         primary_dns = _device_dns(ethernet_iface) or primary_dns
 
+    if connection_type == "ethernet":
+        display_name = ethernet_connection or "Ethernet"
+        primary_interface = ethernet_iface
+        signal = None
+        security = "Ethernet"
+    elif connection_type == "wifi":
+        display_name = wifi_details.get("ssid") or wifi_connection or "Wi-Fi"
+        primary_interface = wifi_iface
+        signal = wifi_details.get("signal")
+        security = wifi_details.get("security")
+    elif connection_type == "hotspot":
+        display_name = DEFAULT_HOTSPOT_SSID
+        primary_interface = wifi_iface
+        signal = None
+        security = "WPA2 hotspot"
+        if not primary_ip:
+            primary_ip = DEFAULT_HOTSPOT_ADDRESS.split("/", 1)[0]
+    else:
+        display_name = None
+        primary_interface = ethernet_iface or wifi_iface
+        signal = None
+        security = None
+
+    wifi_scan_blocked_reason = None
+    if hotspot_active:
+        wifi_scan_blocked_reason = (
+            "The setup hotspot is using the Wi-Fi radio. "
+            "Stop the hotspot to scan for nearby networks."
+        )
+    elif not wifi_hardware_available:
+        wifi_scan_blocked_reason = "No Wi-Fi adapter was detected."
+    elif available and not _wifi_devices():
+        wifi_scan_blocked_reason = (
+            "A Wi-Fi adapter is present, but NetworkManager is not managing it."
+        )
+
     response: dict[str, Any] = {
         "networkmanager_available": available,
-        "wifi_available": wifi_iface is not None,
+        "wifi_available": wifi_hardware_available,
         "ethernet_available": ethernet_iface is not None,
-        "interface": wifi_iface,
+        "interface": primary_interface,
+        "wifi_interface": wifi_iface,
+        "ethernet_interface": ethernet_iface,
         "hostname": _hostname(),
         "local_hostname": f"{_hostname()}.local",
         "connected": bool(ethernet_connected or wifi_connected),
         "connection_type": connection_type,
         "connection_name": ethernet_connection or wifi_connection,
-        "ssid": wifi_details.get("ssid"),
-        "signal": wifi_details.get("signal"),
-        "security": wifi_details.get("security"),
-        "frequency": wifi_details.get("frequency"),
-        "rate": wifi_details.get("rate"),
+        "display_name": display_name,
+        "ssid": (
+            wifi_details.get("ssid")
+            if connection_type == "wifi"
+            else (DEFAULT_HOTSPOT_SSID if connection_type == "hotspot" else None)
+        ),
+        "signal": signal,
+        "security": security,
+        "frequency": wifi_details.get("frequency") if connection_type == "wifi" else None,
+        "rate": wifi_details.get("rate") if connection_type == "wifi" else None,
         "ipv4_addresses": primary_addresses,
         "ip_address": primary_ip,
         "gateway": primary_gateway,
         "dns": primary_dns,
         "hotspot_active": hotspot_active,
+        "hotspot_mode": "hostapd" if hostapd_hotspot else ("networkmanager" if hotspot_is_active() else None),
         "hotspot_connection_name": HOTSPOT_CONNECTION_NAME,
+        "wifi_scan_blocked_reason": wifi_scan_blocked_reason,
         "ethernet": {
             "available": ethernet_iface is not None,
             "connected": ethernet_connected,
@@ -510,8 +579,8 @@ def status() -> dict[str, Any]:
             "gateway": ethernet_gateway,
         },
         "wifi": {
-            "available": wifi_iface is not None,
-            "connected": wifi_connected,
+            "available": wifi_hardware_available,
+            "connected": wifi_connected and not hotspot_active,
             "interface": wifi_iface,
             "connection_name": wifi_connection,
             "ssid": wifi_details.get("ssid"),
@@ -520,9 +589,11 @@ def status() -> dict[str, Any]:
             "ipv4_addresses": wifi_addresses,
             "ip_address": wifi_ip,
             "gateway": wifi_gateway,
+            "managed_by_networkmanager": bool(_wifi_devices()),
         },
         "hotspot": {
             "active": hotspot_active,
+            "mode": "hostapd" if hostapd_hotspot else ("networkmanager" if hotspot_is_active() else None),
             "connection_name": HOTSPOT_CONNECTION_NAME,
             "ssid": DEFAULT_HOTSPOT_SSID,
             "address": DEFAULT_HOTSPOT_ADDRESS.split("/", 1)[0],
@@ -539,6 +610,17 @@ def scan_wifi(rescan: bool = True) -> dict[str, Any]:
     Duplicate SSIDs are combined, keeping the strongest signal.
     """
 
+    if _hostapd_hotspot_active() or hotspot_is_active():
+        return {
+            "ok": False,
+            "message": (
+                "The setup hotspot is using the Wi-Fi radio. "
+                "Stop the hotspot first, then scan for networks."
+            ),
+            "interface": wifi_interface(),
+            "networks": [],
+        }
+
     interface = wifi_interface()
 
     if interface is None:
@@ -546,6 +628,17 @@ def scan_wifi(rescan: bool = True) -> dict[str, Any]:
             "ok": False,
             "message": "No Wi-Fi adapter was detected.",
             "interface": None,
+            "networks": [],
+        }
+
+    if not _wifi_devices():
+        return {
+            "ok": False,
+            "message": (
+                "Wi-Fi hardware was found, but NetworkManager is not managing "
+                f"{interface}, so scanning is unavailable right now."
+            ),
+            "interface": interface,
             "networks": [],
         }
 
@@ -652,6 +745,14 @@ def scan_wifi(rescan: bool = True) -> dict[str, Any]:
             item["ssid"].lower(),
         ),
     )
+
+    if not networks:
+        return {
+            "ok": True,
+            "message": "No nearby Wi-Fi networks were found.",
+            "interface": interface,
+            "networks": [],
+        }
 
     return {
         "ok": True,
@@ -918,6 +1019,21 @@ def start_hotspot(
     NetworkManager's shared IPv4 mode supplies DHCP and NAT.
     """
 
+    if _hostapd_hotspot_active():
+        return CommandResult(
+            True,
+            stdout=(
+                "The MineBox setup hotspot is already active "
+                f"as {DEFAULT_HOTSPOT_SSID} (192.168.4.1)."
+            ),
+        )
+
+    if hotspot_is_active():
+        return CommandResult(
+            True,
+            stdout="The MineBox hotspot is already active.",
+        )
+
     interface = wifi_interface()
 
     if interface is None:
@@ -1046,25 +1162,61 @@ def start_hotspot(
 
 
 def stop_hotspot() -> CommandResult:
-    if not hotspot_is_active():
+    messages: list[str] = []
+
+    if hotspot_is_active():
+        result = _nmcli(
+            [
+                "connection",
+                "down",
+                HOTSPOT_CONNECTION_NAME,
+            ],
+            timeout=30,
+        )
+        if not result.ok:
+            return result
+        messages.append("NetworkManager hotspot stopped.")
+
+    if _hostapd_hotspot_active():
+        stop_hostapd = run(
+            [
+                "sudo",
+                "-n",
+                "/usr/bin/systemctl",
+                "stop",
+                "hostapd.service",
+            ],
+            timeout=30,
+        )
+        # dnsmasq may also be tied to the setup hotspot.
+        run(
+            [
+                "sudo",
+                "-n",
+                "/usr/bin/systemctl",
+                "stop",
+                "dnsmasq.service",
+            ],
+            timeout=30,
+        )
+        if not stop_hostapd.ok:
+            return CommandResult(
+                False,
+                stderr=(
+                    stop_hostapd.stderr
+                    or "Could not stop the MineBox setup hotspot service."
+                ),
+                returncode=stop_hostapd.returncode,
+            )
+        messages.append("Setup hotspot stopped.")
+
+    if not messages:
         return CommandResult(
             True,
             stdout="The MineBox hotspot is already stopped.",
         )
 
-    result = _nmcli(
-        [
-            "connection",
-            "down",
-            HOTSPOT_CONNECTION_NAME,
-        ],
-        timeout=30,
-    )
-
-    if not result.ok:
-        return result
-
     return CommandResult(
         True,
-        stdout="MineBox hotspot stopped.",
+        stdout=" ".join(messages),
     )
