@@ -73,6 +73,34 @@ def history() -> list[Sample]:
     return list(_HISTORY)
 
 
+def system_status() -> dict[str, float | str]:
+    """API-friendly system snapshot used by /api/v1/status."""
+    sample_item = sample()
+    disk = 0.0
+    try:
+        import shutil
+
+        usage = shutil.disk_usage("/")
+        disk = round((usage.used / usage.total) * 100, 1) if usage.total else 0.0
+    except OSError:
+        disk = 0.0
+
+    temperature = "Unavailable"
+    temperature_path = Path("/sys/class/thermal/thermal_zone0/temp")
+    try:
+        temperature = f"{int(temperature_path.read_text(encoding='utf-8').strip()) / 1000:.1f} C"
+    except (OSError, ValueError):
+        pass
+
+    return {
+        "cpu_percent": sample_item.cpu,
+        "memory_percent": sample_item.memory,
+        "disk_percent": disk,
+        "temperature": temperature,
+        "server_memory_mb": sample_item.server_memory_mb,
+    }
+
+
 def sparkline(values: list[float], width: int = 30) -> str:
     if not values:
         return '-'

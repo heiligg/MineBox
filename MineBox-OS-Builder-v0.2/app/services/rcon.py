@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import re
 import socket
 import struct
+
 from config import RCON_HOST, RCON_PORT, RCON_PASSWORD
 from services.system import CommandResult
 
@@ -59,3 +61,56 @@ def send(command: str, timeout: float = 4.0) -> CommandResult:
             return CommandResult(True, stdout=body.strip())
     except (OSError, ValueError, ConnectionError, struct.error) as exc:
         return CommandResult(False, stderr=f"RCON unavailable: {exc}")
+
+
+def players() -> tuple[list[str], int] | None:
+    """
+    Return (player_names, max_players) from the Minecraft list command.
+
+    Returns None when RCON is unavailable or the response cannot be parsed.
+    """
+
+    result = send("list")
+    if not result.ok:
+        return None
+
+    text = (result.stdout or "").strip()
+    if not text:
+        return None
+
+    match = re.search(
+        r"There are (\d+) of a max(?:imum)? of (\d+) players online(?:[:\s]*(.*))?$",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if match is None:
+        match = re.search(
+            r"There are (\d+)/(\d+) players online(?:[:\s]*(.*))?$",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        )
+    if match is None:
+        return None
+
+    try:
+        online_count = int(match.group(1))
+        max_players = int(match.group(2))
+    except (TypeError, ValueError):
+        return None
+
+    names_blob = (match.group(3) or "").strip()
+    names: list[str] = []
+    if names_blob:
+        names = [
+            name.strip()
+            for name in re.split(r",\s*", names_blob)
+            if name.strip()
+        ]
+
+    if not names and online_count == 0:
+        return [], max_players
+
+    if names:
+        return names, max_players
+
+    return [f"player-{index}" for index in range(online_count)], max_players

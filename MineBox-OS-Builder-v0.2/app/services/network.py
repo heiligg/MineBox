@@ -307,82 +307,227 @@ def hotspot_is_active() -> bool:
     return False
 
 
+def _ethernet_devices() -> list[dict[str, str]]:
+    result = _nmcli(
+        [
+            "--terse",
+            "--fields",
+            "DEVICE,TYPE,STATE,CONNECTION",
+            "device",
+            "status",
+        ]
+    )
+    if not result.ok:
+        return []
+
+    devices: list[dict[str, str]] = []
+    for raw_line in result.stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        fields = _split_nmcli_line(line)
+        while len(fields) < 4:
+            fields.append("")
+        device, device_type, state, connection = fields[:4]
+        if device_type != "ethernet":
+            continue
+        devices.append(
+            {
+                "device": device,
+                "type": device_type,
+                "state": state,
+                "connection": connection,
+            }
+        )
+    return devices
+
+
+def ethernet_interface() -> str | None:
+    devices = _ethernet_devices()
+    for device in devices:
+        if device["state"] in {"connected", "connecting"}:
+            return device["device"]
+    if devices:
+        return devices[0]["device"]
+    for candidate in ("eth0", "end0", "enp1s0"):
+        result = run(["ip", "-o", "link", "show", "dev", candidate])
+        if result.ok:
+            return candidate
+    return None
+
+
+def _ip_ipv4(interface: str) -> list[str]:
+    result = run(
+        [
+            "ip",
+            "-4",
+            "-o",
+            "addr",
+            "show",
+            "dev",
+            interface,
+        ]
+    )
+    if not result.ok:
+        return []
+    addresses: list[str] = []
+    for line in result.stdout.splitlines():
+        match = re.search(r"\binet\s+(\d+\.\d+\.\d+\.\d+/\d+)", line)
+        if match:
+            addresses.append(match.group(1))
+    return addresses
+
+
+def _hostapd_hotspot_active() -> bool:
+    result = run(["systemctl", "is-active", "hostapd.service"])
+    if result.ok and result.stdout.strip() == "active":
+        return True
+    for interface in ("wlan0", "wlan1"):
+        for address in _ip_ipv4(interface):
+            if address.startswith("192.168.4.1/"):
+                return True
+    return False
+
+
 def status() -> dict[str, Any]:
     """
     Return the current MineBox network status.
+
+    Includes nested ethernet/wifi/hotspot objects for the setup wizard, plus
+    flat fields for the dashboard network panel.
     """
 
     available = networkmanager_available()
-    interface = wifi_interface()
+    wifi_iface = wifi_interface()
+    ethernet_iface = ethernet_interface()
+
+    ethernet_connected = False
+    ethernet_addresses: list[str] = []
+    ethernet_ip = None
+    ethernet_gateway = None
+    ethernet_connection = None
+
+    if ethernet_iface is not None:
+        if available:
+            devices = _ethernet_devices()
+            selected = next(
+                (device for device in devices if device["device"] == ethernet_iface),
+                None,
+            )
+            if selected is not None:
+                ethernet_connected = selected["state"] == "connected"
+                ethernet_connection = (
+                    selected["connection"]
+                    if selected["connection"] not in {"", "--"}
+                    else None
+                )
+            ethernet_addresses = _device_ipv4(ethernet_iface)
+            ethernet_gateway = _device_gateway(ethernet_iface)
+        if not ethernet_addresses:
+            ethernet_addresses = _ip_ipv4(ethernet_iface)
+        if ethernet_addresses:
+            ethernet_ip = ethernet_addresses[0].split("/", 1)[0]
+            if not ethernet_connected and not ethernet_ip.startswith("169.254."):
+                ethernet_connected = True
+
+    wifi_connected = False
+    wifi_connection = None
+    wifi_details: dict[str, Any] = {}
+    wifi_addresses: list[str] = []
+    wifi_ip = None
+    wifi_gateway = None
+    wifi_dns: list[str] = []
+
+    if available and wifi_iface is not None:
+        devices = _wifi_devices()
+        selected = next(
+            (device for device in devices if device["device"] == wifi_iface),
+            None,
+        )
+        if selected is not None:
+            wifi_connected = selected["state"] == "connected"
+            wifi_connection = (
+                selected["connection"]
+                if selected["connection"] not in {"", "--"}
+                else None
+            )
+        active_wifi = _active_wifi_details(wifi_iface)
+        if active_wifi is not None:
+            wifi_details = active_wifi
+            wifi_connected = True
+        wifi_addresses = _device_ipv4(wifi_iface)
+        if wifi_addresses:
+            wifi_ip = wifi_addresses[0].split("/", 1)[0]
+        wifi_gateway = _device_gateway(wifi_iface)
+        wifi_dns = _device_dns(wifi_iface)
+
+    hotspot_active = hotspot_is_active() or _hostapd_hotspot_active()
+
+    if hotspot_active:
+        connection_type = "hotspot"
+    elif ethernet_connected:
+        connection_type = "ethernet"
+    elif wifi_connected:
+        connection_type = "wifi"
+    else:
+        connection_type = None
+
+    primary_ip = ethernet_ip or wifi_ip
+    primary_gateway = ethernet_gateway or wifi_gateway
+    primary_addresses = ethernet_addresses or wifi_addresses
+    primary_dns = wifi_dns
+    if ethernet_iface and ethernet_connected:
+        primary_dns = _device_dns(ethernet_iface) or primary_dns
 
     response: dict[str, Any] = {
         "networkmanager_available": available,
-        "wifi_available": interface is not None,
-        "interface": interface,
+        "wifi_available": wifi_iface is not None,
+        "ethernet_available": ethernet_iface is not None,
+        "interface": wifi_iface,
         "hostname": _hostname(),
         "local_hostname": f"{_hostname()}.local",
-        "connected": False,
-        "connection_type": None,
-        "connection_name": None,
-        "ssid": None,
-        "signal": None,
-        "security": None,
-        "frequency": None,
-        "rate": None,
-        "ipv4_addresses": [],
-        "ip_address": None,
-        "gateway": None,
-        "dns": [],
-        "hotspot_active": False,
+        "connected": bool(ethernet_connected or wifi_connected),
+        "connection_type": connection_type,
+        "connection_name": ethernet_connection or wifi_connection,
+        "ssid": wifi_details.get("ssid"),
+        "signal": wifi_details.get("signal"),
+        "security": wifi_details.get("security"),
+        "frequency": wifi_details.get("frequency"),
+        "rate": wifi_details.get("rate"),
+        "ipv4_addresses": primary_addresses,
+        "ip_address": primary_ip,
+        "gateway": primary_gateway,
+        "dns": primary_dns,
+        "hotspot_active": hotspot_active,
         "hotspot_connection_name": HOTSPOT_CONNECTION_NAME,
+        "ethernet": {
+            "available": ethernet_iface is not None,
+            "connected": ethernet_connected,
+            "interface": ethernet_iface,
+            "connection_name": ethernet_connection,
+            "ipv4_addresses": ethernet_addresses,
+            "ip_address": ethernet_ip,
+            "gateway": ethernet_gateway,
+        },
+        "wifi": {
+            "available": wifi_iface is not None,
+            "connected": wifi_connected,
+            "interface": wifi_iface,
+            "connection_name": wifi_connection,
+            "ssid": wifi_details.get("ssid"),
+            "signal": wifi_details.get("signal"),
+            "security": wifi_details.get("security"),
+            "ipv4_addresses": wifi_addresses,
+            "ip_address": wifi_ip,
+            "gateway": wifi_gateway,
+        },
+        "hotspot": {
+            "active": hotspot_active,
+            "connection_name": HOTSPOT_CONNECTION_NAME,
+            "ssid": DEFAULT_HOTSPOT_SSID,
+            "address": DEFAULT_HOTSPOT_ADDRESS.split("/", 1)[0],
+        },
     }
-
-    if not available or interface is None:
-        return response
-
-    devices = _wifi_devices()
-    selected_device = next(
-        (
-            device
-            for device in devices
-            if device["device"] == interface
-        ),
-        None,
-    )
-
-    if selected_device is not None:
-        response["connected"] = (
-            selected_device["state"] == "connected"
-        )
-        response["connection_name"] = (
-            selected_device["connection"]
-            if selected_device["connection"] not in {
-                "",
-                "--",
-            }
-            else None
-        )
-
-    response["hotspot_active"] = hotspot_is_active()
-
-    if response["hotspot_active"]:
-        response["connection_type"] = "hotspot"
-    elif response["connected"]:
-        response["connection_type"] = "wifi"
-
-    active_wifi = _active_wifi_details(interface)
-
-    if active_wifi is not None:
-        response.update(active_wifi)
-
-    addresses = _device_ipv4(interface)
-    response["ipv4_addresses"] = addresses
-
-    if addresses:
-        response["ip_address"] = addresses[0].split("/", 1)[0]
-
-    response["gateway"] = _device_gateway(interface)
-    response["dns"] = _device_dns(interface)
 
     return response
 

@@ -264,6 +264,32 @@ def write_commit(path: Path, commit: str) -> None:
     path.write_text(commit + "\n", encoding="utf-8")
 
 
+def install_systemd_units(target: Path, dev: bool) -> None:
+    """Refresh MineBox unit files from the installed app tree."""
+    if dev:
+        return
+    units = [
+        "minebox-api.service",
+        "minebox-update.service",
+        "minebox-maintenance.service",
+        "minebox-maintenance.timer",
+    ]
+    for name in units:
+        source = target / "services" / name
+        if not source.is_file():
+            continue
+        run(
+            [
+                "install",
+                "-m",
+                "0644",
+                str(source),
+                f"/etc/systemd/system/{name}",
+            ]
+        )
+    run(["systemctl", "daemon-reload"], timeout=60)
+
+
 def restart_api(dev: bool) -> None:
     if dev:
         return
@@ -418,6 +444,7 @@ def apply_update(dev: bool) -> int:
                 timeout=900,
             )
 
+        install_systemd_units(target, dev)
         restart_api(dev)
         health_url = os.environ.get(
             "MINEBOX_HEALTH_URL",

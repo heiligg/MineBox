@@ -258,14 +258,21 @@ def status_text() -> str:
 
 
 def player_info() -> tuple[list[str], int] | None:
-    return rcon.players() if is_running() else None
+    if not is_running():
+        return None
+    try:
+        return rcon.players()
+    except Exception:
+        return None
 
 
 def player_count_text() -> str:
+    if not is_running():
+        return "Offline"
     info = player_info()
     if info:
         return f"{len(info[0])}/{info[1]}"
-    return "Offline" if not is_running() else "Unavailable"
+    return "Unavailable"
 
 
 def version() -> str:
