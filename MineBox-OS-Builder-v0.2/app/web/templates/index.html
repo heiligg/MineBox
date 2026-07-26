@@ -3156,6 +3156,10 @@
                 );
 
                 const data = await readResponse(response);
+                const consolePayload =
+                    data && typeof data.console === "object"
+                        ? data.console
+                        : data;
                 const lines = getConsoleLines(data);
 
                 if (
@@ -3164,6 +3168,18 @@
                         lastConsoleLines.length
                 ) {
                     consoleCleared = false;
+                }
+
+                if (
+                    (!lines || lines.length === 0) &&
+                    consolePayload &&
+                    consolePayload.available === false &&
+                    consolePayload.message
+                ) {
+                    renderConsole([
+                        consolePayload.message
+                    ]);
+                    return;
                 }
 
                 renderConsole(lines);

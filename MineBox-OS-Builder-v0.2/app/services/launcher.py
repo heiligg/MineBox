@@ -541,17 +541,8 @@ def main() -> int:
     try:
         server_dir, command, env = build_command()
         os.chdir(server_dir)
-        # Keep stderr in a file so dashboard start failures can show the real reason.
-        log_dir = server_dir / "logs"
-        log_dir.mkdir(parents=True, exist_ok=True)
-        stderr_path = log_dir / "minebox-stderr.log"
-        stderr_fd = os.open(
-            stderr_path,
-            os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-            0o644,
-        )
-        os.dup2(stderr_fd, 2)
-        os.close(stderr_fd)
+        # Do not steal Java stdout/stderr — Forge/Minecraft console logging
+        # often goes there, and the dashboard reads logs/*.log for the UI.
         if env is None:
             os.execv(command[0], command)
         else:

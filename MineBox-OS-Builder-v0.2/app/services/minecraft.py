@@ -470,6 +470,16 @@ def uptime() -> str:
 
 def recent_logs(count: int = 20) -> list[str]:
     try:
+        from services import logs
+
+        payload = logs.latest_lines(count)
+        if payload.get("lines"):
+            return list(payload["lines"])
+        if payload.get("message"):
+            return [str(payload["message"])]
+    except Exception:
+        pass
+    try:
         lines = _server_log().read_text(
             encoding="utf-8",
             errors="ignore",
