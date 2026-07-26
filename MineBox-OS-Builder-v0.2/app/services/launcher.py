@@ -29,6 +29,16 @@ def _required_java_major(version: str) -> int:
     return 21
 
 
+def _max_java_major(version: str) -> int | None:
+    """Old LaunchWrapper Forge breaks on Java 9+ with ClassCastException."""
+    parsed = _version_tuple(version)
+    if parsed and parsed <= (1, 12, 2):
+        return 8
+    if parsed and parsed < (1, 17):
+        return 16
+    return None
+
+
 def _java_candidates(version: str) -> list[str]:
     configured = os.environ.get("MINEBOX_JAVA")
     candidates: list[str] = [configured] if configured else []
@@ -86,7 +96,9 @@ def _java_major_version(java: str) -> int | None:
 
 def _find_java(version: str) -> str:
     required = _required_java_major(version)
-    fallback: str | None = None
+    maximum = _max_java_major(version)
+    compatible: list[tuple[int, str]] = []
+
     for candidate in _java_candidates(version):
         if not candidate:
             continue
@@ -103,24 +115,30 @@ def _find_java(version: str) -> str:
 
         major = _java_major_version(resolved)
         if major is None:
-            fallback = fallback or resolved
             continue
-        if major >= required:
-            return resolved
-        fallback = fallback or resolved
+        if major < required:
+            continue
+        if maximum is not None and major > maximum:
+            continue
+        compatible.append((major, resolved))
 
-    if fallback:
-        major = _java_major_version(fallback)
-        if major is not None and major < required:
-            raise RuntimeError(
-                f"Minecraft {version} needs Java {required}+, but found Java "
-                f"{major} at {fallback}. Install openjdk-{required}-jre-headless."
-            )
-        return fallback
+    if compatible:
+        # Prefer the newest allowed runtime.
+        compatible.sort(key=lambda item: item[0], reverse=True)
+        return compatible[0][1]
 
+    if maximum is not None:
+        raise RuntimeError(
+            f"Minecraft {version} needs Java {required}"
+            + (f"-{maximum}" if maximum != required else "")
+            + ". Newer Java breaks this Forge build "
+            "(ClassCastException / LaunchWrapper). "
+            f"Install openjdk-{required}-jre-headless, or create a Forge "
+            "1.18+ server instead."
+        )
     raise RuntimeError(
         f"No compatible Java runtime was found for Minecraft {version} "
-        f"(needs Java {_required_java_major(version)}+)."
+        f"(needs Java {required}+). Install openjdk-{required}-jre-headless."
     )
 
 
@@ -172,20 +190,15 @@ def _find_forge_unix_args(server_dir: Path, instance: servers.ServerInstance) ->
                 return candidate
 
     matches = sorted(
-        (server_dir / "libraries" / "net" / "minecraftforge" / "forge").glob(
-            "*/unix_args.txt"
-        )
-    )
-    if matches:
-        return matches[-1]
-
-    neoforge = sorted(
-        (server_dir / "libraries" / "net" / "neoforged" / "neoforge").glob(
-            "*/unix_args.txt"
-        )
-    )
-    if neoforge:
-        return neoforge[-1]
+        (server_dir / "libraries").rglob("unix_args.txt")
+    ) if (server_dir / "libraries").is_dir() else []
+    forge_matches = [
+        path
+        for path in matches
+        if "minecraftforge" in path.as_posix() or "neoforged" in path.as_posix()
+    ]
+    if forge_matches:
+        return forge_matches[-1]
     return None
 
 
@@ -238,28 +251,31 @@ def _forge_command(
             "nogui",
         ]
 
-    for pattern in ("forge-*-shim.jar", "forge-*.jar"):
-        for path in sorted(server_dir.glob(pattern)):
-            if "installer" in path.name:
-                continue
-            memory = max(1, int(instance.memory_gb))
-            return [
-                java,
-                f"-Xms{min(memory, 2)}G",
-                f"-Xmx{memory}G",
-                "-jar",
-                path.name,
-                "nogui",
-            ]
+    parsed = _version_tuple(instance.version)
+    legacy = bool(parsed and parsed <= (1, 12, 2))
+    if legacy:
+        for pattern in ("forge-*.jar",):
+            for path in sorted(server_dir.glob(pattern)):
+                if "installer" in path.name or "shim" in path.name:
+                    continue
+                memory = max(1, int(instance.memory_gb))
+                return [
+                    java,
+                    f"-Xms{min(memory, 2)}G",
+                    f"-Xmx{memory}G",
+                    "-jar",
+                    path.name,
+                    "nogui",
+                ]
 
+    # Modern Forge without unix_args is incomplete — do not -jar (causes
+    # LaunchWrapper ClassCastException on the wrong jar).
     if run_sh.is_file():
-        # Last resort: synthesize a safe launcher that skips onlyCheckJava.
-        safe = server_dir / "minebox-forge-run.sh"
-        # Parse the unix_args reference from run.sh when possible.
         text = run_sh.read_text(encoding="utf-8", errors="ignore")
         match = re.search(r"@(\S*libraries/\S+/unix_args\.txt)", text)
         if match:
             args_rel = match.group(1)
+            safe = server_dir / "minebox-forge-run.sh"
             safe.write_text(
                 "#!/bin/bash\n"
                 "set -e\n"
@@ -272,7 +288,11 @@ def _forge_command(
                 pass
             return ["/bin/bash", str(safe)]
 
-    return None
+    raise RuntimeError(
+        "This Forge install is missing libraries/.../unix_args.txt. "
+        "Create a new Forge 1.18+ server from setup (recommended on MineBox), "
+        "or reinstall Forge so the server libraries are complete."
+    )
 
 
 def _resolve_main_jar(server_dir: Path, instance: servers.ServerInstance) -> str:

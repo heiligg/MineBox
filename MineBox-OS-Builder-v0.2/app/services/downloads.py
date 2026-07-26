@@ -186,6 +186,9 @@ def _fabric_versions() -> list[dict[str, str]]:
 
 def _forge_versions() -> list[dict[str, str]]:
     # Prefer promotions map (recommended builds), fall back to maven metadata.
+    # MineBox only offers Forge for modern Minecraft: older Forge needs Java 8
+    # and crashes on the Pi's Java 17+ with LaunchWrapper ClassCastException.
+    minimum_mc = (1, 18)
     versions: list[dict[str, str]] = []
     seen: set[str] = set()
     try:
@@ -204,6 +207,8 @@ def _forge_versions() -> list[dict[str, str]]:
             mc_version = str(key).rsplit("-", 1)[0]
             if mc_version in seen:
                 continue
+            if _version_key(mc_version) < minimum_mc:
+                continue
             seen.add(mc_version)
             versions.append(
                 {
@@ -219,7 +224,6 @@ def _forge_versions() -> list[dict[str, str]]:
         pass
 
     if versions:
-        # Newest Minecraft versions first where possible.
         versions.sort(key=lambda item: _version_key(item["id"]), reverse=True)
         return versions
 
@@ -231,6 +235,8 @@ def _forge_versions() -> list[dict[str, str]]:
             continue
         mc_version, forge_build = full.split("-", 1)
         if mc_version in seen:
+            continue
+        if _version_key(mc_version) < minimum_mc:
             continue
         seen.add(mc_version)
         versions.append(
@@ -272,6 +278,13 @@ def download_server(
 ) -> dict[str, Any]:
     clean = servers.normalize_loader(loader)
     server_dir.mkdir(parents=True, exist_ok=True)
+
+    if clean == "forge" and _version_key(version_id) < (1, 18):
+        raise DownloadError(
+            f"Forge {version_id} is not supported on MineBox. "
+            "It needs Java 8 and crashes on the Pi's newer Java. "
+            "Choose Forge 1.18 or newer."
+        )
 
     if clean == "vanilla":
         return _install_vanilla(version_id, server_dir, overwrite=overwrite)
