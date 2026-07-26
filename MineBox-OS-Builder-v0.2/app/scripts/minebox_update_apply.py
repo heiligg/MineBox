@@ -290,6 +290,52 @@ def install_systemd_units(target: Path, dev: bool) -> None:
     run(["systemctl", "daemon-reload"], timeout=60)
 
 
+def install_minecraft_permissions(target: Path, dev: bool) -> None:
+    """Make /opt/minecraft writable by the minebox dashboard user."""
+    if dev:
+        return
+    script = target / "scripts" / "minebox_fix_minecraft_perms.py"
+    if script.is_file():
+        run(["chmod", "0755", str(script)])
+        run(["/usr/bin/python3", str(script)], timeout=300)
+        run(
+            [
+                "install",
+                "-m",
+                "0755",
+                str(script),
+                "/usr/local/sbin/minebox-fix-minecraft-perms",
+            ]
+        )
+
+    sudoers = Path("/etc/sudoers.d/minebox")
+    desired = (
+        "minebox ALL=(root) NOPASSWD: "
+        "/usr/bin/systemctl start minecraft.service, "
+        "/usr/bin/systemctl stop minecraft.service, "
+        "/usr/bin/systemctl restart minecraft.service, "
+        "/usr/bin/systemctl start minebox-update.service, "
+        "/usr/bin/python3 /opt/minebox/scripts/minebox_fix_minecraft_perms.py, "
+        "/usr/local/sbin/minebox-fix-minecraft-perms, "
+        "/usr/bin/systemctl poweroff, "
+        "/usr/bin/systemctl reboot\n"
+    )
+    try:
+        current = sudoers.read_text(encoding="utf-8") if sudoers.is_file() else ""
+    except OSError:
+        current = ""
+    if "minebox_fix_minecraft_perms" not in current:
+        sudoers.write_text(desired, encoding="utf-8")
+        os.chmod(sudoers, 0o440)
+        subprocess.run(
+            ["visudo", "-cf", str(sudoers)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+
 def restart_api(dev: bool) -> None:
     if dev:
         return
@@ -445,6 +491,7 @@ def apply_update(dev: bool) -> int:
             )
 
         install_systemd_units(target, dev)
+        install_minecraft_permissions(target, dev)
         restart_api(dev)
         health_url = os.environ.get(
             "MINEBOX_HEALTH_URL",

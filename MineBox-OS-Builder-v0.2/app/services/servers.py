@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,47 @@ def slugify_server_id(value: str) -> str:
 def ensure_layout() -> None:
     SERVERS_DIR.mkdir(parents=True, exist_ok=True)
     METADATA_DIR.mkdir(parents=True, exist_ok=True)
+    # Best-effort: if root-owned files block writes, ask the privileged helper.
+    _ensure_writable(SERVERS_DIR)
+    _ensure_writable(METADATA_DIR)
+
+
+def _ensure_writable(path: Path) -> None:
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        probe = path / ".minebox-write-test"
+        probe.write_text("ok\n", encoding="utf-8")
+        probe.unlink(missing_ok=True)
+        return
+    except OSError:
+        pass
+
+    helpers = [
+        [
+            "sudo",
+            "-n",
+            "/usr/local/sbin/minebox-fix-minecraft-perms",
+        ],
+        [
+            "sudo",
+            "-n",
+            "/usr/bin/python3",
+            "/opt/minebox/scripts/minebox_fix_minecraft_perms.py",
+        ],
+    ]
+    for command in helpers:
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+            if result.returncode == 0:
+                return
+        except (OSError, subprocess.SubprocessError):
+            continue
 
 
 def server_directory(server_id: str) -> Path:
