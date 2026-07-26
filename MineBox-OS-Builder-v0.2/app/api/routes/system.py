@@ -20,13 +20,15 @@ def minecraft_status() -> dict[str, Any]:
         "running": minecraft.is_running(),
         "status": minecraft.status_text(),
         "players": minecraft.player_count_text(),
-        "version": active.version if active else minecraft.version(),
+        "version": minecraft.version(),
         "uptime": minecraft.uptime(),
         "server_name": active.name if active else "Minecraft Server",
         "server_id": active.server_id if active else None,
         "port": active.port if active else 25565,
         "rcon_port": active.rcon_port if active else 25575,
         "memory_gb": active.memory_gb if active else None,
+        "loader": active.loader if active else "vanilla",
+        "loader_version": active.loader_version if active else "",
     }
 
 

@@ -122,13 +122,23 @@ def _dev_start() -> CommandResult:
     except Exception as error:
         return CommandResult(False, stderr=str(error))
 
-    server_jar = server_dir / "server.jar"
     start_script = server_dir / "start.sh"
-    if not server_jar.is_file() and not start_script.is_file():
+    has_launchable = (
+        start_script.is_file()
+        or (server_dir / "server.jar").is_file()
+        or (server_dir / "fabric-server-launch.jar").is_file()
+        or (server_dir / ".minebox-forge-args").is_file()
+        or any(server_dir.glob("forge-*-shim.jar"))
+        or any(
+            path.is_file() and "installer" not in path.name
+            for path in server_dir.glob("forge-*.jar")
+        )
+    )
+    if not has_launchable:
         return CommandResult(
             False,
             stderr=(
-                f"Missing server.jar or start.sh in '{server_dir}'. "
+                f"Missing a launchable Minecraft server in '{server_dir}'. "
                 "Create or finish installing a Minecraft server first."
             ),
         )
@@ -273,20 +283,28 @@ def player_count_text() -> str:
 
 
 def version() -> str:
+    active = servers.active_server()
+    detected = "Unknown"
     try:
         text = _server_log().read_text(encoding="utf-8", errors="ignore")
     except OSError:
-        active = servers.active_server()
-        return active.version if active else "Unknown"
+        text = ""
     matches = re.findall(
         r"Starting minecraft server version ([^\s]+)",
         text,
         re.I,
     )
     if matches:
-        return matches[-1]
-    active = servers.active_server()
-    return active.version if active else "Unknown"
+        detected = matches[-1]
+    elif active:
+        detected = active.version
+
+    if active and active.loader and active.loader != "vanilla":
+        label = active.loader.capitalize()
+        if active.loader_version:
+            return f"{detected} ({label} {active.loader_version})"
+        return f"{detected} ({label})"
+    return detected
 
 
 def uptime() -> str:

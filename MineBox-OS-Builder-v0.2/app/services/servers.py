@@ -39,6 +39,27 @@ class ServerInstance:
     memory_gb: int
     port: int
     rcon_port: int
+    loader: str = "vanilla"
+    loader_version: str = ""
+    main_jar: str = "server.jar"
+
+
+SUPPORTED_LOADERS = (
+    "vanilla",
+    "paper",
+    "fabric",
+    "forge",
+)
+
+
+def normalize_loader(value: str | None) -> str:
+    loader = (value or "vanilla").strip().lower()
+    if loader not in SUPPORTED_LOADERS:
+        raise ServerManagerError(
+            f"Unsupported server type '{value}'. "
+            f"Choose one of: {', '.join(SUPPORTED_LOADERS)}."
+        )
+    return loader
 
 
 def slugify_server_id(value: str) -> str:
@@ -135,6 +156,9 @@ def list_servers() -> list[ServerInstance]:
                 memory_gb=int(raw.get("memory_gb", 4)),
                 port=int(raw.get("port", DEFAULT_SERVER_PORT)),
                 rcon_port=int(raw.get("rcon_port", DEFAULT_RCON_PORT)),
+                loader=str(raw.get("loader", "vanilla")),
+                loader_version=str(raw.get("loader_version", "")),
+                main_jar=str(raw.get("main_jar", "server.jar")),
             )
         )
     return sorted(server_instances, key=lambda item: item.name.lower())
@@ -173,8 +197,12 @@ def reserve_server(
     version: str,
     memory_gb: int,
     server_id: str | None = None,
+    loader: str = "vanilla",
+    loader_version: str = "",
+    main_jar: str = "server.jar",
 ) -> ServerInstance:
     clean_id = slugify_server_id(server_id or name)
+    clean_loader = normalize_loader(loader)
     registry = _load_registry()
     if clean_id in registry["servers"] or server_directory(clean_id).exists():
         raise ServerManagerError(f"A server named '{clean_id}' already exists.")
@@ -189,6 +217,9 @@ def reserve_server(
         memory_gb=memory_gb,
         port=DEFAULT_SERVER_PORT,
         rcon_port=DEFAULT_RCON_PORT,
+        loader=clean_loader,
+        loader_version=str(loader_version or ""),
+        main_jar=str(main_jar or "server.jar"),
     )
     registry["servers"][clean_id] = asdict(instance)
     _save_registry(registry)
@@ -197,6 +228,25 @@ def reserve_server(
         set_active_server(clean_id)
 
     return instance
+
+
+def update_server_launch(
+    server_id: str,
+    *,
+    loader_version: str | None = None,
+    main_jar: str | None = None,
+) -> ServerInstance:
+    clean_id = slugify_server_id(server_id)
+    registry = _load_registry()
+    entry = registry["servers"].get(clean_id)
+    if not isinstance(entry, dict):
+        raise ServerManagerError(f"Server '{clean_id}' does not exist.")
+    if loader_version is not None:
+        entry["loader_version"] = loader_version
+    if main_jar is not None:
+        entry["main_jar"] = main_jar
+    _save_registry(registry)
+    return get_server(clean_id)
 
 
 def normalize_shared_ports() -> int:

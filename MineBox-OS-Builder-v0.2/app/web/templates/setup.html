@@ -672,12 +672,23 @@
 
                 <section class="step" data-step="2">
                     <div class="step-label">Server software</div>
-                    <h2>Choose a Minecraft version</h2>
+                    <h2>Choose server type and version</h2>
 
                     <p class="description">
-                        The list below comes directly from Minecraft's official
-                        version information.
+                        Pick Vanilla, Paper, Fabric, or Forge, then choose a
+                        Minecraft version for that software.
                     </p>
+
+                    <div class="field">
+                        <label for="server-type">Server type</label>
+
+                        <select id="server-type">
+                            <option value="vanilla">Vanilla</option>
+                            <option value="paper">Paper</option>
+                            <option value="fabric">Fabric</option>
+                            <option value="forge">Forge</option>
+                        </select>
+                    </div>
 
                     <div class="field">
                         <label for="version">Minecraft version</label>
@@ -687,17 +698,9 @@
                         </select>
                     </div>
 
-                    <div class="field">
-                        <label for="server-type">Server type</label>
-
-                        <select id="server-type">
-                            <option value="vanilla">Vanilla</option>
-                        </select>
-                    </div>
-
-                    <div class="notice visible">
-                        Paper, Fabric, Forge, and other server types will be
-                        added after the Vanilla setup flow is complete.
+                    <div class="notice visible" id="loader-hint">
+                        Vanilla is the official Minecraft server. Paper adds
+                        performance plugins; Fabric and Forge support mods.
                     </div>
 
                     <div class="error" id="version-error"></div>
@@ -796,7 +799,7 @@
                     <div class="summary">
                         <div class="summary-row">
                             <span>Server type</span>
-                            <strong>Vanilla</strong>
+                            <strong id="summary-type">Vanilla</strong>
                         </div>
 
                         <div class="summary-row">
@@ -893,9 +896,43 @@
         const existingNotice = document.getElementById("existing-notice");
 
         const versionSelect = document.getElementById("version");
+        const serverTypeSelect = document.getElementById("server-type");
+        const loaderHint = document.getElementById("loader-hint");
         const serverNameInput = document.getElementById("server-name");
         const memoryInput = document.getElementById("memory");
         const memoryValue = document.getElementById("memory-value");
+
+        const LOADER_HINTS = {
+            vanilla:
+                "Vanilla is the official Minecraft server from Mojang.",
+            paper:
+                "Paper is a high-performance server that supports Bukkit/Spigot plugins.",
+            fabric:
+                "Fabric is a lightweight mod loader. Add mods to the mods folder after install.",
+            forge:
+                "Forge is a popular mod loader. Install can take several minutes on a Pi."
+        };
+
+        function selectedLoaderVersion() {
+            const option = versionSelect.selectedOptions[0];
+            return option ? (option.dataset.loaderVersion || "") : "";
+        }
+
+        function selectedVersionLabel() {
+            const option = versionSelect.selectedOptions[0];
+            return option ? option.textContent : versionSelect.value;
+        }
+
+        function selectedTypeLabel() {
+            const option = serverTypeSelect.selectedOptions[0];
+            return option ? option.textContent : serverTypeSelect.value;
+        }
+
+        function updateLoaderHint() {
+            const type = serverTypeSelect.value || "vanilla";
+            loaderHint.textContent =
+                LOADER_HINTS[type] || LOADER_HINTS.vanilla;
+        }
 
         let currentStep = 0;
         let setupMode = "create";
@@ -1321,9 +1358,16 @@
 
         async function loadVersions() {
             clearError("version-error");
+            updateLoaderHint();
+
+            const serverType = serverTypeSelect.value || "vanilla";
+            versionSelect.innerHTML =
+                '<option value="">Loading versions...</option>';
 
             try {
-                const response = await fetch("/api/v1/setup/versions");
+                const response = await fetch(
+                    `/api/v1/setup/versions?server_type=${encodeURIComponent(serverType)}`
+                );
                 const data = await readResponse(response);
 
                 versionSelect.innerHTML = "";
@@ -1331,7 +1375,10 @@
                 for (const version of data.versions) {
                     const option = document.createElement("option");
                     option.value = version.id;
-                    option.textContent = version.id;
+                    option.textContent = version.label || version.id;
+                    if (version.loader_version) {
+                        option.dataset.loaderVersion = version.loader_version;
+                    }
                     versionSelect.appendChild(option);
                 }
 
@@ -1390,6 +1437,8 @@
                             server_name: serverNameInput.value.trim(),
                             memory_gb: Number(memoryInput.value),
                             version: versionSelect.value,
+                            server_type: serverTypeSelect.value || "vanilla",
+                            loader_version: selectedLoaderVersion(),
                             overwrite: false
                         })
                     }
@@ -1487,8 +1536,11 @@
                     return;
                 }
 
+                document.getElementById("summary-type").textContent =
+                    selectedTypeLabel();
+
                 document.getElementById("summary-version").textContent =
-                    versionSelect.value;
+                    selectedVersionLabel();
 
                 document.getElementById("summary-name").textContent =
                     name;
@@ -1523,6 +1575,13 @@
             "input",
             () => {
                 memoryValue.textContent = `${memoryInput.value} GB`;
+            }
+        );
+
+        serverTypeSelect.addEventListener(
+            "change",
+            () => {
+                loadVersions();
             }
         );
 

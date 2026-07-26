@@ -55,10 +55,18 @@ simulation-distance=10
 
 
 def write_start_script(instance: ServerInstance, server_dir: Path) -> None:
+    main_jar = instance.main_jar or "server.jar"
+    if main_jar.startswith("@"):
+        launch = f'exec java -Xms{instance.memory_gb}G -Xmx{instance.memory_gb}G {main_jar} nogui'
+    else:
+        launch = (
+            f'exec java -Xms{instance.memory_gb}G -Xmx{instance.memory_gb}G '
+            f'-jar {main_jar} nogui'
+        )
     script = f"""#!/bin/bash
 set -e
 cd {server_dir}
-exec java -Xms{instance.memory_gb}G -Xmx{instance.memory_gb}G -jar server.jar nogui
+{launch}
 """
 
     path = server_dir / "start.sh"
@@ -80,4 +88,5 @@ def initialize(instance: ServerInstance) -> dict:
         "memory_gb": instance.memory_gb,
         "port": instance.port,
         "rcon_port": instance.rcon_port,
+        "loader": instance.loader,
     }

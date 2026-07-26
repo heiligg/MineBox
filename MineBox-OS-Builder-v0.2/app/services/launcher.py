@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -65,28 +64,56 @@ def _find_java(version: str) -> str:
     )
 
 
+def _resolve_main_jar(server_dir: Path, instance: servers.ServerInstance) -> str:
+    configured = (instance.main_jar or "server.jar").strip()
+    if configured.startswith("@"):
+        return configured
+    if configured and (server_dir / configured).is_file():
+        return configured
+
+    forge_args = server_dir / ".minebox-forge-args"
+    if forge_args.is_file():
+        relative = forge_args.read_text(encoding="utf-8").strip()
+        if relative and (server_dir / relative).is_file():
+            return f"@{relative}"
+
+    for name in (
+        "fabric-server-launch.jar",
+        "server.jar",
+    ):
+        if (server_dir / name).is_file():
+            return name
+
+    for path in sorted(server_dir.glob("forge-*-shim.jar")):
+        return path.name
+    for path in sorted(server_dir.glob("forge-*.jar")):
+        if "installer" in path.name:
+            continue
+        return path.name
+
+    raise RuntimeError(
+        f"The active server '{instance.name}' does not have a launchable server jar."
+    )
+
+
 def build_command() -> tuple[Path, list[str]]:
     instance = servers.active_server()
     if instance is None:
         raise RuntimeError("No active Minecraft server is selected.")
 
     server_dir = Path(instance.directory)
-    server_jar = server_dir / "server.jar"
-    if not server_jar.is_file():
-        raise RuntimeError(
-            f"The active server '{instance.name}' does not have server.jar."
-        )
-
     memory = max(1, int(instance.memory_gb))
     java = _find_java(instance.version)
-    command = [
-        java,
-        f"-Xms{memory}G",
-        f"-Xmx{memory}G",
-        "-jar",
-        "server.jar",
-        "nogui",
-    ]
+    main_jar = _resolve_main_jar(server_dir, instance)
+
+    command = [java, f"-Xms{memory}G", f"-Xmx{memory}G"]
+    if main_jar.startswith("@"):
+        # Modern Forge/NeoForge style argfiles.
+        command.append(main_jar)
+        command.append("nogui")
+    else:
+        command.extend(["-jar", main_jar, "nogui"])
+
     return server_dir, command
 
 

@@ -21,6 +21,8 @@ class CreateServerRequest(BaseModel):
     server_name: str = Field(default="My MineBox Server", min_length=1, max_length=100)
     memory_gb: int = Field(default=4, ge=1, le=64)
     version: str = Field(min_length=1, max_length=40)
+    server_type: str = Field(default="vanilla", min_length=1, max_length=32)
+    loader_version: str = Field(default="", max_length=64)
     server_id: str | None = Field(default=None, min_length=1, max_length=48)
     overwrite: bool = False
 
@@ -50,15 +52,27 @@ def setup_status():
         "server_count": len(instances),
         "active_server_id": active.server_id if active else None,
         "servers": [instance.__dict__ for instance in instances],
+        "supported_loaders": list(servers.SUPPORTED_LOADERS),
     }
 
 
 @router.get("/versions")
-def list_versions(include_snapshots: bool = Query(default=False)):
+def list_versions(
+    include_snapshots: bool = Query(default=False),
+    server_type: str = Query(default="vanilla"),
+):
     try:
-        versions = downloads.available_versions(include_snapshots=include_snapshots)
-        return {"success": True, "count": len(versions), "versions": versions}
-    except downloads.DownloadError as error:
+        versions = downloads.available_versions_for_loader(
+            loader=server_type,
+            include_snapshots=include_snapshots,
+        )
+        return {
+            "success": True,
+            "server_type": servers.normalize_loader(server_type),
+            "count": len(versions),
+            "versions": versions,
+        }
+    except (downloads.DownloadError, servers.ServerManagerError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
 
 
@@ -91,11 +105,14 @@ def create_server(request: CreateServerRequest):
     server_dir = None
 
     try:
+        loader = servers.normalize_loader(request.server_type)
         instance = servers.reserve_server(
             name=request.server_name,
             version=request.version,
             memory_gb=request.memory_gb,
             server_id=request.server_id,
+            loader=loader,
+            loader_version=request.loader_version,
         )
         server_dir = Path(instance.directory)
 
@@ -104,7 +121,17 @@ def create_server(request: CreateServerRequest):
             version_id=request.version,
             server_dir=server_dir,
             overwrite=request.overwrite,
+            loader=loader,
+            loader_version=request.loader_version,
         )
+        servers.update_server_launch(
+            instance.server_id,
+            loader_version=str(download_result.get("loader_version") or ""),
+            main_jar=str(download_result.get("main_jar") or "server.jar"),
+        )
+        # Refresh start.sh now that main_jar is known.
+        updated = servers.get_server(instance.server_id)
+        installer.write_start_script(updated, server_dir)
         servers.set_active_server(instance.server_id)
         write_setup_marker()
 
@@ -114,12 +141,15 @@ def create_server(request: CreateServerRequest):
             "server_name": instance.name,
             "memory_gb": instance.memory_gb,
             "version": instance.version,
+            "server_type": loader,
+            "loader_version": download_result.get("loader_version", ""),
             "port": instance.port,
             "rcon_port": instance.rcon_port,
             "directory": install_result["directory"],
             "server_jar": download_result["file"],
-            "size_bytes": download_result["size_bytes"],
-            "sha1": download_result["sha1"],
+            "main_jar": download_result.get("main_jar", "server.jar"),
+            "size_bytes": download_result.get("size_bytes", 0),
+            "sha1": download_result.get("sha1", ""),
         }
 
     except (downloads.DownloadError, servers.ServerManagerError) as error:
