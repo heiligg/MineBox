@@ -3361,19 +3361,37 @@
         }
 
         function shouldHideConsoleLine(line) {
-            if (!filterRconCheckbox.checked) {
+            if (!filterRconCheckbox || !filterRconCheckbox.checked) {
                 return false;
             }
 
-            const text = String(line);
-            const normalized = text.toLowerCase();
-            return (
-                text.includes("Rcon connection from:") ||
-                text.includes("RCON Client #") ||
-                normalized.includes("[rcon:") ||
-                normalized.includes("/rcon listener") ||
+            const normalized = String(line).toLowerCase();
+
+            // Vanilla / Paper / older Forge
+            if (
+                normalized.includes("rcon connection from") ||
                 normalized.includes("rcon running on")
-            );
+            ) {
+                return true;
+            }
+
+            // Fabric / modern Minecraft calendar builds:
+            // [RCON Listener #1/INFO]: Thread RCON Client /127.0.0.1 started
+            // [RCON Client /127.0.0.1 #2/INFO]: Thread RCON Client ... shutting down
+            if (
+                normalized.includes("rcon listener") ||
+                normalized.includes("rcon client") ||
+                normalized.includes("thread rcon")
+            ) {
+                return true;
+            }
+
+            // Command replies mirrored as [Rcon: ...] — still noisy for polling.
+            if (normalized.includes("[rcon:")) {
+                return true;
+            }
+
+            return false;
         }
 
         function renderConsole(lines) {
