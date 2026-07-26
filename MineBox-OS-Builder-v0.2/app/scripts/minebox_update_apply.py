@@ -363,6 +363,11 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
 
     fan_script = target / "scripts" / "minebox_fan_test.py"
     if fan_script.is_file():
+        try:
+            raw = fan_script.read_bytes().replace(b"\r\n", b"\n")
+            fan_script.write_bytes(raw)
+        except OSError:
+            pass
         run(["chmod", "0755", str(fan_script)])
         run(
             [
@@ -373,6 +378,26 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
                 "/usr/local/sbin/minebox-fan-test",
             ]
         )
+
+    # Ensure Pi 5 official cooler firmware control is enabled.
+    for config_path in (
+        Path("/boot/firmware/config.txt"),
+        Path("/boot/config.txt"),
+    ):
+        if not config_path.is_file():
+            continue
+        try:
+            text = config_path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if "dtparam=cooling_fan=on" not in text:
+            with config_path.open("a", encoding="utf-8") as handle:
+                handle.write(
+                    "\n# MineBox: enable official Pi 5 Active Cooler control\n"
+                    "dtparam=cooling_fan=on\n"
+                )
+            print(f"Enabled cooling_fan in {config_path}", flush=True)
+        break
 
     # Allow the dashboard user to read live Minecraft service logs.
     subprocess.run(
@@ -431,6 +456,7 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
         "/usr/bin/python3 /opt/minebox/scripts/minebox_ensure_java.py, "
         "/usr/local/sbin/minebox-ensure-java, "
         "/usr/bin/python3 /opt/minebox/scripts/minebox_fan_test.py *, "
+        "/usr/bin/python3 /usr/local/sbin/minebox-fan-test *, "
         "/usr/local/sbin/minebox-fan-test *, "
         "/usr/bin/journalctl -u minecraft.service *, "
         "/usr/bin/systemctl poweroff, "

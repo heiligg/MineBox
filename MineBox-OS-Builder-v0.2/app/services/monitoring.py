@@ -314,12 +314,12 @@ def run_fan_test(duration_seconds: int = 8) -> dict[str, float | int | str | boo
         / "scripts"
         / "minebox_fan_test.py"
     )
-    # Must run via sudo — sysfs cooling controls are root-only.
-    # Prefer the installed helper; fall back to the OTA script path.
+    # Always invoke via python3 so Windows CRLF shebangs cannot break execve.
     commands = [
         [
             "sudo",
             "-n",
+            "/usr/bin/python3",
             "/usr/local/sbin/minebox-fan-test",
             "--seconds",
             str(duration_seconds),
@@ -333,22 +333,26 @@ def run_fan_test(duration_seconds: int = 8) -> dict[str, float | int | str | boo
             str(duration_seconds),
         ],
     ]
-    if script.is_file() and script.resolve() != Path(
-        "/opt/minebox/scripts/minebox_fan_test.py"
-    ).resolve():
-        commands.append(
-            [
-                "sudo",
-                "-n",
-                "/usr/bin/python3",
-                str(script),
-                "--seconds",
-                str(duration_seconds),
-            ]
-        )
+    if script.is_file():
+        resolved = str(script.resolve())
+        if resolved not in {
+            "/usr/local/sbin/minebox-fan-test",
+            "/opt/minebox/scripts/minebox_fan_test.py",
+        }:
+            commands.append(
+                [
+                    "sudo",
+                    "-n",
+                    "/usr/bin/python3",
+                    resolved,
+                    "--seconds",
+                    str(duration_seconds),
+                ]
+            )
 
     last_error = "Fan test failed."
     ran = False
+    stdout_text = ""
     for command in commands:
         try:
             result = subprocess.run(
@@ -363,6 +367,7 @@ def run_fan_test(duration_seconds: int = 8) -> dict[str, float | int | str | boo
             continue
         if result.returncode == 0:
             ran = True
+            stdout_text = (result.stdout or "").strip()
             break
         detail = (result.stderr or result.stdout or "").strip()
         if "password is required" in detail.lower() or "a password is required" in detail.lower():
@@ -377,15 +382,34 @@ def run_fan_test(duration_seconds: int = 8) -> dict[str, float | int | str | boo
         raise RuntimeError(last_error)
 
     after = fan_status()
-    return {
-        "ok": True,
-        "message": (
+    peak_rpm = None
+    if "peak_rpm=" in stdout_text:
+        try:
+            peak_rpm = int(stdout_text.split("peak_rpm=", 1)[1].split()[0])
+        except (IndexError, ValueError):
+            peak_rpm = None
+    if peak_rpm is None:
+        peak_rpm = after.get("fan_rpm")
+
+    if isinstance(peak_rpm, int) and peak_rpm > 0:
+        message = (
+            f"Fan test finished — cooler reached about {peak_rpm} RPM. "
+            "If you still heard nothing, check the Active Cooler cable "
+            "on the Pi 5 fan header."
+        )
+    else:
+        message = (
             "Fan test finished. The cooler should have spun at full speed "
             "for a few seconds. If you heard nothing, reseat the Active "
             "Cooler cable on the Pi 5 fan header."
-        ),
+        )
+
+    return {
+        "ok": True,
+        "message": message,
         "before": before,
         "after": after,
+        "peak_rpm": peak_rpm,
         "duration_seconds": duration_seconds,
         **after,
     }

@@ -1,12 +1,15 @@
 #!/usr/bin/python3
-"""Force the Pi 5 firmware cooling fan to max briefly, then restore.
+"""Force the Pi 5 Active Cooler to full speed briefly, then restore.
 
-Used by the dashboard "Test fan" action. Prefers thermal cooling_device
-cur_state, with pwm1 as a fallback.
+The firmware thermal governor can overwrite cooling_device cur_state within
+1-2 seconds, so this helper prefers pinctrl FAN_PWM force, and otherwise
+re-asserts cur_state/pwm for the whole test window.
 """
 from __future__ import annotations
 
 import argparse
+import shutil
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -28,11 +31,34 @@ def _require_root() -> None:
 
     if os.geteuid() != 0:
         print(
-            "Fan test must run as root via sudo "
-            "(minebox-fan-test). Permission denied writing sysfs.",
+            "Fan test must run as root via sudo (minebox-fan-test).",
             file=sys.stderr,
         )
         raise SystemExit(2)
+
+
+def _rpm_paths() -> list[Path]:
+    paths: list[Path] = []
+    platform_fan = Path("/sys/devices/platform/cooling_fan")
+    if platform_fan.is_dir():
+        paths.extend(sorted(platform_fan.glob("hwmon/hwmon*/fan1_input")))
+    class_hwmon = Path("/sys/class/hwmon")
+    if class_hwmon.is_dir():
+        for path in sorted(class_hwmon.glob("hwmon*/fan1_input")):
+            if path not in paths:
+                paths.append(path)
+    return paths
+
+
+def _read_rpm() -> int | None:
+    best: int | None = None
+    for path in _rpm_paths():
+        value = _read_int(path)
+        if value is None:
+            continue
+        if best is None or value > best:
+            best = value
+    return best
 
 
 def _cooling_devices() -> list[Path]:
@@ -68,10 +94,53 @@ def _pwm_paths() -> list[Path]:
     return paths
 
 
-def run_test(seconds: int) -> int:
-    _require_root()
-    seconds = max(3, min(seconds, 20))
-    restored = False
+def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+
+
+def _pinctrl_force(seconds: int) -> tuple[bool, int | None]:
+    pinctrl = shutil.which("pinctrl")
+    if not pinctrl:
+        return False, None
+
+    check = _run([pinctrl, "FAN_PWM"])
+    if check.returncode != 0:
+        return False, None
+
+    peak = _read_rpm() or 0
+    forced = _run([pinctrl, "FAN_PWM", "op", "dl"])
+    if forced.returncode != 0:
+        detail = (forced.stderr or forced.stdout or "").strip()
+        print(f"pinctrl force failed: {detail}", file=sys.stderr)
+        return False, None
+
+    try:
+        deadline = time.time() + seconds
+        while time.time() < deadline:
+            time.sleep(0.4)
+            rpm = _read_rpm()
+            if rpm is not None and rpm > peak:
+                peak = rpm
+    finally:
+        restore = _run([pinctrl, "FAN_PWM", "a0"])
+        if restore.returncode != 0:
+            print(
+                "warning: could not restore FAN_PWM to PWM mode "
+                f"({(restore.stderr or restore.stdout or '').strip()})",
+                file=sys.stderr,
+            )
+
+    return True, peak
+
+
+def _hold_sysfs(seconds: int) -> tuple[bool, int | None]:
+    peak = _read_rpm() or 0
 
     for device in _cooling_devices():
         cur_path = device / "cur_state"
@@ -81,44 +150,73 @@ def run_test(seconds: int) -> int:
         if previous is None or maximum is None or maximum < 1:
             continue
         try:
-            _write_int(cur_path, maximum)
-            time.sleep(seconds)
+            deadline = time.time() + seconds
+            while time.time() < deadline:
+                _write_int(cur_path, maximum)
+                time.sleep(0.35)
+                rpm = _read_rpm()
+                if rpm is not None and rpm > peak:
+                    peak = rpm
         except PermissionError as error:
             print(f"Permission denied writing {cur_path}: {error}", file=sys.stderr)
-            return 2
+            return False, peak
         finally:
             try:
-                if previous is not None:
-                    _write_int(cur_path, previous)
-                    restored = True
+                _write_int(cur_path, previous)
             except OSError as error:
                 print(f"warning: could not restore fan state: {error}", file=sys.stderr)
-        print(f"ok cooling_device={device.name} max={maximum} seconds={seconds}")
-        return 0
+        print(
+            f"ok method=cooling_device device={device.name} "
+            f"max={maximum} seconds={seconds} peak_rpm={peak}"
+        )
+        return True, peak
 
     for pwm in _pwm_paths():
         previous = _read_int(pwm)
         if previous is None:
             continue
         try:
-            _write_int(pwm, 255)
-            time.sleep(seconds)
+            deadline = time.time() + seconds
+            while time.time() < deadline:
+                _write_int(pwm, 255)
+                time.sleep(0.35)
+                rpm = _read_rpm()
+                if rpm is not None and rpm > peak:
+                    peak = rpm
         except PermissionError as error:
             print(f"Permission denied writing {pwm}: {error}", file=sys.stderr)
-            return 2
+            return False, peak
         finally:
             try:
-                if previous is not None:
-                    _write_int(pwm, previous)
-                    restored = True
+                _write_int(pwm, previous)
             except OSError as error:
                 print(f"warning: could not restore pwm: {error}", file=sys.stderr)
-        print(f"ok pwm={pwm} seconds={seconds} restored={restored}")
+        print(f"ok method=pwm path={pwm} seconds={seconds} peak_rpm={peak}")
+        return True, peak
+
+    return False, peak if peak else None
+
+
+def run_test(seconds: int) -> int:
+    _require_root()
+    seconds = max(3, min(seconds, 20))
+    before = _read_rpm()
+
+    ok, peak = _pinctrl_force(seconds)
+    if ok:
+        print(
+            f"ok method=pinctrl seconds={seconds} "
+            f"before_rpm={before} peak_rpm={peak}"
+        )
+        return 0
+
+    ok, peak = _hold_sysfs(seconds)
+    if ok:
         return 0
 
     print(
         "No writable cooling fan control found "
-        "(expected Pi 5 Active Cooler sysfs).",
+        "(expected Pi 5 Active Cooler sysfs/pinctrl).",
         file=sys.stderr,
     )
     return 1
