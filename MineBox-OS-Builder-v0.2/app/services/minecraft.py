@@ -508,7 +508,12 @@ def _validate_settings_payload(
 
 
 def save_server_settings(payload: dict[str, object]) -> dict[str, object]:
-    """API payload for PUT /api/v1/minecraft/settings."""
+    """API payload for PUT /api/v1/minecraft/settings.
+
+    Minecraft rewrites server.properties from memory on shutdown. To make UI
+    changes stick, stop the server first (if running), write the file, then
+    start again when apply/restart was requested or the server was running.
+    """
     raw_settings = payload.get("settings", payload)
     if not isinstance(raw_settings, dict):
         return {
@@ -518,6 +523,7 @@ def save_server_settings(payload: dict[str, object]) -> dict[str, object]:
             "settings": {},
         }
 
+    apply_changes = bool(payload.get("restart") or payload.get("apply"))
     errors = _validate_settings_payload(raw_settings)
     if errors:
         return {
@@ -529,6 +535,7 @@ def save_server_settings(payload: dict[str, object]) -> dict[str, object]:
         }
 
     properties_path = _server_properties()
+    servers.ensure_layout()
     if not properties_path.is_file():
         return {
             "ok": False,
@@ -538,72 +545,161 @@ def save_server_settings(payload: dict[str, object]) -> dict[str, object]:
             "settings": {},
         }
 
-    updated: dict[str, object] = {}
+    formatted: dict[str, str] = {}
     for key in _SETTINGS_KEYS:
         if key not in raw_settings:
             continue
         value = _format_setting_value(key, raw_settings[key])
         if key in _SETTINGS_SELECT_KEYS:
             value = value.lower()
-        result = update_property(key, value)
-        if not result.ok:
+        formatted[key] = value
+
+    was_running = is_running()
+    if was_running:
+        # Stop first so Minecraft's shutdown flush cannot overwrite our edits.
+        stopped = stop()
+        if not stopped.ok:
             return {
                 "ok": False,
                 "status_code": 500,
-                "message": result.stderr or f"Could not update {key}.",
+                "message": (
+                    "Could not stop Minecraft to apply settings: "
+                    f"{stopped.stderr or stopped.stdout}"
+                ),
                 "path": str(properties_path),
                 "settings": {},
             }
-        if key in _SETTINGS_BOOLEAN_KEYS:
-            updated[key] = _parse_bool(value)
-        elif key in _SETTINGS_INTEGER_KEYS:
-            updated[key] = int(value)
-        else:
-            updated[key] = value
+        # Brief pause so the process fully releases the properties file.
+        time.sleep(1.0)
 
-    current = read_server_settings()
+    write_result = write_properties_updates(formatted)
+    if not write_result.ok:
+        # Try to bring the server back if we stopped it.
+        if was_running:
+            start()
+        return {
+            "ok": False,
+            "status_code": 500,
+            "message": write_result.stderr or "Could not write server.properties.",
+            "path": str(properties_path),
+            "settings": {},
+        }
+
+    # Keep the MineBox server registry in sync with the game port / MOTD.
+    try:
+        active = servers.active_server()
+        if active is not None:
+            registry = servers._load_registry()
+            entry = registry.get("servers", {}).get(active.server_id)
+            if isinstance(entry, dict):
+                if "server-port" in formatted:
+                    entry["port"] = int(formatted["server-port"])
+                if "motd" in formatted and formatted["motd"].strip():
+                    entry["name"] = formatted["motd"].strip()[:80]
+                servers._save_registry(registry)
+    except Exception:
+        pass
+
     try:
         from services import join_access
 
-        port_value = current.get("settings", {}).get("server-port")
         join_access.ensure_avahi_advertisement(
-            int(port_value) if port_value is not None else None
+            int(formatted["server-port"])
+            if "server-port" in formatted
+            else None
         )
     except Exception:
         pass
 
+    should_start = apply_changes or was_running
+    started_ok = True
+    start_message = ""
+    if should_start:
+        started = start()
+        started_ok = bool(started.ok)
+        start_message = started.stdout or started.stderr or ""
+
+    current = read_server_settings()
+    if not started_ok:
+        return {
+            "ok": False,
+            "status_code": 500,
+            "message": (
+                "Settings were written, but Minecraft did not start: "
+                f"{start_message}"
+            ),
+            "path": str(properties_path),
+            "settings": current.get("settings", {}),
+            "restart_required": False,
+        }
+
+    if was_running or apply_changes:
+        message = "Settings saved and Minecraft restarted so they take effect."
+    else:
+        message = "Settings saved to server.properties."
+
     return {
         "ok": True,
-        "message": (
-            "Server settings saved. Restart Minecraft to apply the changes."
-        ),
+        "message": message,
         "path": str(properties_path),
-        "settings": current.get("settings", updated),
-        "restart_required": True,
+        "settings": current.get("settings", {}),
+        "restart_required": False,
+        "applied": bool(was_running or apply_changes),
     }
 
 
-def update_property(key: str, value: str) -> CommandResult:
+def write_properties_updates(updates: dict[str, str]) -> CommandResult:
+    """Write many server.properties keys in a single pass."""
     properties_path = _server_properties()
     try:
-        lines = properties_path.read_text(encoding="utf-8").splitlines()
-        found = False
-        output = []
+        if properties_path.is_file():
+            lines = properties_path.read_text(encoding="utf-8").splitlines()
+        else:
+            lines = []
+
+        remaining = dict(updates)
+        output: list[str] = []
         for line in lines:
-            if not line.startswith("#") and line.split("=", 1)[0] == key:
-                output.append(f"{key}={value}")
-                found = True
-            else:
-                output.append(line)
-        if not found:
+            stripped = line.strip()
+            if (
+                stripped
+                and not stripped.startswith("#")
+                and "=" in stripped
+            ):
+                key = stripped.split("=", 1)[0]
+                if key in remaining:
+                    output.append(f"{key}={remaining.pop(key)}")
+                    continue
+            output.append(line)
+
+        for key, value in remaining.items():
             output.append(f"{key}={value}")
-        properties_path.write_text(
-            "\n".join(output) + "\n",
-            encoding="utf-8",
-        )
+
+        temporary = properties_path.with_suffix(".properties.minebox-tmp")
+        temporary.write_text("\n".join(output) + "\n", encoding="utf-8")
+        temporary.replace(properties_path)
+
+        # Verify the values we care about actually landed.
+        written, error = read_properties()
+        if error:
+            return CommandResult(False, stderr=error)
+        for key, value in updates.items():
+            if written.get(key) != value:
+                return CommandResult(
+                    False,
+                    stderr=(
+                        f"server.properties did not keep {key}={value} "
+                        f"(found {written.get(key)!r})."
+                    ),
+                )
+
         return CommandResult(
             True,
-            f"{key} updated. Restart Minecraft to apply it.",
+            "server.properties updated.",
         )
     except OSError as exc:
         return CommandResult(False, stderr=str(exc))
+
+
+def update_property(key: str, value: str) -> CommandResult:
+    return write_properties_updates({key: value})

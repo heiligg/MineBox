@@ -871,7 +871,8 @@
                         "Content-Type": "application/json"
                     },
                     body: JSON.stringify({
-                        settings: collectSettings()
+                        settings: collectSettings(),
+                        restart: Boolean(restartAfterSave)
                     })
                 }
             );
@@ -880,42 +881,28 @@
 
             populateForm(data.settings || {});
 
-            if (!restartAfterSave) {
+            form.dataset.dirty = "false";
+            updateDirtyNote();
+
+            if (data.applied || restartAfterSave) {
                 showMessage(
                     data.message ||
-                    "Settings saved. Restart Minecraft to apply them.",
-                    "warning"
+                    "Settings saved and Minecraft restarted so they take effect.",
+                    "success"
                 );
 
                 refreshNote.textContent =
-                    "Saved · Restart required";
+                    "Saved and applied";
+            } else {
+                showMessage(
+                    data.message ||
+                    "Settings saved to server.properties.",
+                    "success"
+                );
 
-                return;
+                refreshNote.textContent =
+                    "Saved";
             }
-
-            showMessage(
-                "Settings saved. Restarting Minecraft…",
-                "warning"
-            );
-
-            const restartResponse = await fetch(
-                RESTART_API,
-                {
-                    method: "POST"
-                }
-            );
-
-            const restartData =
-                await parseResponse(restartResponse);
-
-            showMessage(
-                restartData.message ||
-                "Settings saved and Minecraft restarted.",
-                "success"
-            );
-
-            refreshNote.textContent =
-                "Saved and applied";
 
             if (
                 typeof window.refreshStatus === "function"
