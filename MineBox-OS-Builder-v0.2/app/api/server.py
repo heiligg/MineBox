@@ -13,6 +13,7 @@ from api.routes import mods as mods_routes
 from api.routes import network
 from api.routes import players as players_routes
 from api.routes import update
+from api.routes import appliance as appliance_routes
 from api.routes.auth import router as auth_router
 from api.routes.console import router as console_router
 from api.routes.dashboard import router as dashboard_router
@@ -72,6 +73,7 @@ app.include_router(mods_routes.router)
 app.include_router(network.router)
 app.include_router(update.router)
 app.include_router(join.router)
+app.include_router(appliance_routes.router)
 
 
 @app.get("/docs-home", include_in_schema=False)

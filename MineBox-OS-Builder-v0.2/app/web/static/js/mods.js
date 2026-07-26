@@ -21,6 +21,7 @@
         supports_modrinth: false,
         supports_curseforge: false,
         curseforge_configured: false,
+        server_running: false,
     };
 
     function injectStyles() {
@@ -104,6 +105,20 @@
                 align-items: center;
                 padding: 8px 0;
                 border-bottom: 1px solid rgba(255,255,255,0.08);
+            }
+            .mods-row-copy {
+                display: grid;
+                gap: 2px;
+                min-width: 0;
+            }
+            .mods-row-copy strong {
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .mods-button.danger {
+                border-color: rgba(220, 80, 80, 0.45);
+                color: #ff9c9c;
             }
             .mods-empty { color: var(--muted); font-size: 14px; }
             .mods-message {
@@ -210,6 +225,7 @@
             supports_modrinth: Boolean(payload.supports_modrinth),
             supports_curseforge: Boolean(payload.supports_curseforge),
             curseforge_configured: Boolean(payload.curseforge_configured),
+            server_running: Boolean(payload.server_running),
         };
         note.textContent = `${context.loader} ${context.version} → ${context.target_folder}/`;
         if (providerSelect) {
@@ -235,12 +251,20 @@
         for (const item of items) {
             const row = document.createElement("div");
             row.className = "mods-row";
+            const copy = document.createElement("div");
+            copy.className = "mods-row-copy";
             const name = document.createElement("strong");
             name.textContent = item.name;
             const meta = document.createElement("span");
             meta.className = "mods-card-meta";
             meta.textContent = item.path;
-            row.append(name, meta);
+            copy.append(name, meta);
+            const remove = document.createElement("button");
+            remove.type = "button";
+            remove.className = "mods-button danger";
+            remove.textContent = "Remove";
+            remove.addEventListener("click", () => removeInstalled(item.name));
+            row.append(copy, remove);
             installedBox.appendChild(row);
         }
     }
@@ -374,16 +398,40 @@
             });
             applyContext(payload);
             const name = payload.installed && payload.installed.name;
-            showMessage(
-                name ? `Installed ${name}` : "Installed successfully.",
-                "success"
-            );
+            let text = name ? `Installed ${name}` : "Installed successfully.";
+            if (payload.server_running) {
+                text += " Restart the server to load it.";
+            }
+            showMessage(text, "success");
         } catch (error) {
             const msg = error.message || "Install failed.";
             showMessage(
                 source === "curseforge" ? curseForgeErrorMessage(msg) : msg,
                 "error"
             );
+        } finally {
+            busy = false;
+        }
+    }
+
+    async function removeInstalled(name) {
+        if (busy || !name) {
+            return;
+        }
+        if (!window.confirm(`Remove ${name} from ${context.target_folder}/?`)) {
+            return;
+        }
+        busy = true;
+        showMessage(`Removing ${name}…`);
+        try {
+            const payload = await api(`${API_BASE}/remove`, {
+                method: "POST",
+                body: JSON.stringify({ name }),
+            });
+            applyContext(payload);
+            showMessage(payload.message || `Removed ${name}.`, "success");
+        } catch (error) {
+            showMessage(error.message || "Could not remove jar.", "error");
         } finally {
             busy = false;
         }
@@ -436,10 +484,11 @@
             applyContext(payload);
             urlInput.value = "";
             const name = payload.installed && payload.installed.name;
-            showMessage(
-                name ? `Installed ${name}` : "Installed successfully.",
-                "success"
-            );
+            let text = name ? `Installed ${name}` : "Installed successfully.";
+            if (payload.server_running) {
+                text += " Restart the server to load it.";
+            }
+            showMessage(text, "success");
         } catch (error) {
             showMessage(error.message || "URL install failed.", "error");
         } finally {

@@ -253,6 +253,35 @@ def update_server_launch(
     return get_server(clean_id)
 
 
+def update_memory_gb(server_id: str | None, memory_gb: int) -> ServerInstance:
+    """Update JVM heap for a server and rewrite start scripts / JVM args."""
+    memory = max(1, min(int(memory_gb), 64))
+    clean_id = slugify_server_id(server_id or "")
+    if not clean_id:
+        active = active_server()
+        if active is None:
+            raise ServerManagerError("No active Minecraft server is configured.")
+        clean_id = active.server_id
+    registry = _load_registry()
+    entry = registry["servers"].get(clean_id)
+    if not isinstance(entry, dict):
+        raise ServerManagerError(f"Server '{clean_id}' does not exist.")
+    entry["memory_gb"] = memory
+    _save_registry(registry)
+    instance = get_server(clean_id)
+    server_dir = Path(instance.directory).expanduser()
+    try:
+        from services.installer import write_start_script
+        from services.launcher import _write_user_jvm_args
+
+        if server_dir.is_dir():
+            write_start_script(instance, server_dir)
+            _write_user_jvm_args(server_dir, memory)
+    except OSError as error:
+        raise ServerManagerError(f"Could not update launch scripts: {error}") from error
+    return instance
+
+
 def normalize_shared_ports() -> int:
     """Set every registered server to MineBox's shared default ports."""
     registry = _load_registry()

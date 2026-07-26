@@ -241,6 +241,13 @@ def context() -> dict[str, Any]:
         except OSError:
             pass
     loaders = _modrinth_loaders()
+    running = False
+    try:
+        from services import minecraft as minecraft_service
+
+        running = bool(minecraft_service.is_running())
+    except Exception:
+        running = False
     return {
         "server_id": active.server_id,
         "server_name": active.name,
@@ -251,6 +258,8 @@ def context() -> dict[str, Any]:
         "supports_modrinth": bool(loaders),
         "supports_curseforge": bool(loaders) or active.loader == "paper",
         "curseforge_configured": bool(curseforge_api_key()),
+        "server_running": running,
+        "restart_recommended": running and bool(installed),
     }
 
 
@@ -664,5 +673,46 @@ def install_url(url: str, *, filename: str | None = None) -> dict[str, Any]:
             "size": size,
             "source_url": clean_url,
         },
+        **context(),
+    }
+
+
+def uninstall(filename: str) -> dict[str, Any]:
+    """Remove a jar from the active server's mods/ or plugins/ folder."""
+    folder = target_folder_for_loader()
+    root = _root()
+    target_dir = (root / folder).resolve()
+    # Basename only — reject path traversal.
+    name = Path(filename or "").name.strip()
+    if not name or name in {".", ".."}:
+        raise ModsError("Choose a jar to remove.")
+    if not name.lower().endswith(".jar"):
+        raise ModsError("Only .jar files can be removed from this panel.")
+    destination = (target_dir / name).resolve()
+    try:
+        destination.relative_to(target_dir)
+    except ValueError as error:
+        raise ModsError("Invalid jar path.") from error
+    if destination.parent != target_dir:
+        raise ModsError("Invalid jar path.")
+    if not destination.is_file():
+        raise ModsError(f"{name} was not found in {folder}/.")
+    try:
+        destination.unlink()
+    except OSError as error:
+        raise ModsError(f"Could not remove {name}: {error}") from error
+
+    from services import minecraft as minecraft_service
+
+    running = bool(minecraft_service.is_running())
+    return {
+        "ok": True,
+        "removed": name,
+        "restart_required": running,
+        "message": (
+            f"Removed {name}. Restart the server for the change to apply."
+            if running
+            else f"Removed {name}."
+        ),
         **context(),
     }

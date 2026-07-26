@@ -2,6 +2,7 @@
 
 (() => {
     const SETTINGS_API = "/api/v1/minecraft/settings";
+    const APPLIANCE_API = "/api/v1/appliance";
     const RESTART_API = "/api/v1/minecraft/restart";
 
     const fields = [
@@ -115,6 +116,36 @@
             description:
                 "Reset every player to the server gamemode when they join. Kept on when you change gamemode from MineBox.",
             type: "checkbox"
+        }
+    ];
+
+    const applianceFields = [
+        {
+            key: "memory_gb",
+            label: "JVM memory (GB)",
+            description:
+                "Heap size for the Minecraft process. Takes effect after a restart.",
+            type: "number",
+            min: 1,
+            max: 64
+        },
+        {
+            key: "scheduled_restart_time",
+            label: "Daily restart time",
+            description:
+                "24-hour HH:MM local time (for example 04:30). Leave blank to disable.",
+            type: "text",
+            maxlength: 5,
+            placeholder: "04:30"
+        },
+        {
+            key: "automatic_backup_hours",
+            label: "Automatic backup interval (hours)",
+            description:
+                "Create a world backup every N hours. Use 0 to disable.",
+            type: "number",
+            min: 0,
+            max: 720
         }
     ];
 
@@ -564,6 +595,11 @@
                 "Gameplay options",
                 toggleFields,
                 "settings-toggle-list"
+            ),
+            createGroup(
+                "MineBox appliance",
+                applianceFields,
+                "settings-grid"
             )
         );
 
@@ -708,7 +744,7 @@
         }
     }
 
-    function populateForm(settings) {
+    function populateForm(settings, appliance = {}) {
         for (const field of fields) {
             const input = form.elements[field.key];
 
@@ -720,6 +756,19 @@
                 input.checked = Boolean(settings[field.key]);
             } else {
                 input.value = String(settings[field.key]);
+            }
+        }
+
+        for (const field of applianceFields) {
+            const input = form.elements[field.key];
+            if (!input) {
+                continue;
+            }
+            const value = appliance[field.key];
+            if (value === undefined || value === null) {
+                input.value = field.key === "scheduled_restart_time" ? "" : "0";
+            } else {
+                input.value = String(value);
             }
         }
 
@@ -746,6 +795,22 @@
         return result;
     }
 
+    function collectAppliance() {
+        const result = {};
+        for (const field of applianceFields) {
+            const input = form.elements[field.key];
+            if (!input) {
+                continue;
+            }
+            if (field.type === "number") {
+                result[field.key] = Number(input.value);
+            } else {
+                result[field.key] = input.value.trim();
+            }
+        }
+        return result;
+    }
+
     function updateDirtyNote() {
         const note =
             document.getElementById("settings-dirty-note");
@@ -764,12 +829,14 @@
         clearErrors();
 
         let valid = true;
+        const allFields = fields.concat(applianceFields);
 
-        for (const field of fields) {
+        for (const field of allFields) {
             const input = form.elements[field.key];
 
             if (
                 field.type !== "checkbox" &&
+                input &&
                 !input.checkValidity()
             ) {
                 valid = false;
@@ -781,6 +848,20 @@
                 if (error) {
                     error.textContent =
                         input.validationMessage;
+                }
+            }
+        }
+
+        const restartInput = form.elements.scheduled_restart_time;
+        if (restartInput && restartInput.value.trim()) {
+            const ok = /^\d{1,2}:\d{2}$/.test(restartInput.value.trim());
+            if (!ok) {
+                valid = false;
+                const error = form.querySelector(
+                    '[data-error-for="scheduled_restart_time"]'
+                );
+                if (error) {
+                    error.textContent = "Use HH:MM, such as 04:30.";
                 }
             }
         }
@@ -803,17 +884,15 @@
         }
 
         try {
-            const response = await fetch(
-                SETTINGS_API,
-                {
-                    method: "GET",
-                    cache: "no-store"
-                }
-            );
+            const [settingsResponse, applianceResponse] = await Promise.all([
+                fetch(SETTINGS_API, { method: "GET", cache: "no-store" }),
+                fetch(APPLIANCE_API, { method: "GET", cache: "no-store" }),
+            ]);
 
-            const data = await parseResponse(response);
+            const data = await parseResponse(settingsResponse);
+            const appliance = await parseResponse(applianceResponse);
 
-            populateForm(data.settings || {});
+            populateForm(data.settings || {}, appliance);
 
             refreshNote.textContent =
                 `Loaded · ${new Date().toLocaleTimeString(
@@ -866,9 +945,9 @@
         clearMessage();
 
         try {
-            const response = await fetch(
-                SETTINGS_API,
-                {
+            const applianceBody = collectAppliance();
+            const [response, applianceResponse] = await Promise.all([
+                fetch(SETTINGS_API, {
                     method: "PUT",
                     headers: {
                         "Content-Type": "application/json"
@@ -877,19 +956,41 @@
                         settings: collectSettings(),
                         restart: Boolean(restartAfterSave)
                     })
-                }
-            );
+                }),
+                fetch(APPLIANCE_API, {
+                    method: "PUT",
+                    headers: {
+                        "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify(applianceBody)
+                }),
+            ]);
 
             const data = await parseResponse(response);
+            const appliance = await parseResponse(applianceResponse);
 
-            populateForm(data.settings || {});
+            populateForm(data.settings || {}, appliance);
 
             form.dataset.dirty = "false";
             updateDirtyNote();
 
+            const parts = [];
+            if (data.message) {
+                parts.push(data.message);
+            }
+            if (appliance.message) {
+                parts.push(appliance.message);
+            }
+            if (
+                appliance.restart_required_for_memory
+                && !restartAfterSave
+            ) {
+                parts.push("Restart Minecraft to apply the new JVM memory.");
+            }
+
             if (data.applied || restartAfterSave) {
                 showMessage(
-                    data.message ||
+                    parts.join(" ") ||
                     "Settings saved and Minecraft restarted so they take effect.",
                     "success"
                 );
@@ -898,8 +999,8 @@
                     "Saved and applied";
             } else {
                 showMessage(
-                    data.message ||
-                    "Settings saved to server.properties.",
+                    parts.join(" ") ||
+                    "Settings saved.",
                     "success"
                 );
 

@@ -25,6 +25,10 @@ class InstallUrlRequest(BaseModel):
     filename: str | None = Field(default=None, max_length=180)
 
 
+class RemoveModRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=180)
+
+
 class CurseForgeKeyRequest(BaseModel):
     api_key: str = Field(default="", max_length=512)
 
@@ -82,6 +86,14 @@ def install_from_catalog(body: InstallProjectRequest) -> dict[str, Any]:
 def install_from_url(body: InstallUrlRequest) -> dict[str, Any]:
     try:
         return mods.install_url(body.url, filename=body.filename)
+    except mods.ModsError as error:
+        raise _http_error(error) from error
+
+
+@router.post("/remove")
+def remove_installed_mod(body: RemoveModRequest) -> dict[str, Any]:
+    try:
+        return mods.uninstall(body.name)
     except mods.ModsError as error:
         raise _http_error(error) from error
 
