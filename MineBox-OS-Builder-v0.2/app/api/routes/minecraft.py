@@ -100,6 +100,19 @@ def launch_debug() -> dict[str, Any]:
     return payload
 
 
+@router.get("/settings")
+def server_settings():
+    result = minecraft.read_server_settings()
+
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=500,
+            detail=result,
+        )
+
+    return result
+
+
 @router.put("/settings")
 def update_server_settings(
     payload: dict[str, Any],
@@ -113,4 +126,12 @@ def update_server_settings(
         )
 
     return result
+
+
+@router.post("/settings")
+def update_server_settings_post(
+    payload: dict[str, Any],
+):
+    """Allow POST as well as PUT for broader client compatibility."""
+    return update_server_settings(payload)
 
