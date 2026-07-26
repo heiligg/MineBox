@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 """Ensure a compatible Java runtime exists for a Minecraft / Forge version.
 
-Runs as root (sudo) from the MineBox launcher when the needed JDK is missing.
+Runs as root (sudo / update apply) when the needed JDK is missing.
 Uses apt when packages exist; otherwise downloads Eclipse Temurin from Adoptium
 into /opt/java (needed for Java 8 on Debian Bookworm / Raspberry Pi OS).
 """
@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -123,7 +124,7 @@ def find_java(min_major: int, max_major: int | None = None) -> str | None:
 def _apt_install(packages: list[str]) -> bool:
     env = os.environ.copy()
     env["DEBIAN_FRONTEND"] = "noninteractive"
-    update = subprocess.run(
+    subprocess.run(
         ["apt-get", "update"],
         check=False,
         capture_output=True,
@@ -131,9 +132,6 @@ def _apt_install(packages: list[str]) -> bool:
         timeout=300,
         env=env,
     )
-    if update.returncode != 0:
-        print(update.stderr or update.stdout, file=sys.stderr)
-
     install = subprocess.run(
         ["apt-get", "install", "-y", "--no-install-recommends", *packages],
         check=False,
@@ -143,15 +141,42 @@ def _apt_install(packages: list[str]) -> bool:
         env=env,
     )
     if install.returncode != 0:
-        print(install.stderr or install.stdout, file=sys.stderr)
+        detail = (install.stderr or install.stdout or "").strip()
+        if detail:
+            print(detail, file=sys.stderr)
         return False
     return True
 
 
+def _stream_download(url: str, destination: Path) -> None:
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+    with urllib.request.urlopen(request, timeout=300) as response:
+        with destination.open("wb") as output:
+            shutil.copyfileobj(response, output, length=1024 * 1024)
+
+
+def _extract_tar_gz(archive: Path, extract_dir: Path) -> Path:
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive, "r:gz") as tar:
+        try:
+            tar.extractall(extract_dir, filter="data")
+        except TypeError:
+            tar.extractall(extract_dir)
+    children = [path for path in extract_dir.iterdir() if path.is_dir()]
+    if not children:
+        raise RuntimeError("archive had no top-level directory")
+    return children[0]
+
+
 def _download_temurin(major: int) -> str:
     arch = _adoptium_arch()
-    # Prefer JRE when available; fall back to JDK.
+    # Try JDK first — Temurin 8 often has no separate JRE build anymore.
     urls = [
+        (
+            "https://api.adoptium.net/v3/binary/latest/"
+            f"{major}/ga/linux/{arch}/jdk/hotspot/normal/eclipse"
+            "?project=jdk"
+        ),
         (
             "https://api.adoptium.net/v3/binary/latest/"
             f"{major}/ga/linux/{arch}/jre/hotspot/normal/eclipse"
@@ -159,45 +184,46 @@ def _download_temurin(major: int) -> str:
         ),
         (
             "https://api.adoptium.net/v3/binary/latest/"
-            f"{major}/ga/linux/{arch}/jdk/hotspot/normal/eclipse"
-            "?project=jdk"
+            f"{major}/ga/linux/{arch}/jdk/hotspot/normal/adoptium"
         ),
     ]
 
     JAVA_ROOT.mkdir(parents=True, exist_ok=True)
     target = JAVA_ROOT / f"temurin-{major}"
-    if (target / "bin" / "java").is_file():
-        return str(target / "bin" / "java")
+    java_path = target / "bin" / "java"
+    if java_path.is_file() and os.access(java_path, os.X_OK):
+        return str(java_path)
 
     last_error = "download failed"
     for url in urls:
         with tempfile.TemporaryDirectory(prefix="minebox-java-") as tmp:
             archive = Path(tmp) / "temurin.tar.gz"
-            request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
             try:
-                with urllib.request.urlopen(request, timeout=180) as response:
-                    archive.write_bytes(response.read())
-            except Exception as error:  # noqa: BLE001 - surface download issues
+                print(f"Downloading Temurin {major} from Adoptium...", file=sys.stderr)
+                _stream_download(url, archive)
+                if archive.stat().st_size < 1_000_000:
+                    last_error = f"download too small ({archive.stat().st_size} bytes)"
+                    continue
+                payload = _extract_tar_gz(archive, Path(tmp) / "extract")
+            except (urllib.error.URLError, TimeoutError, OSError, RuntimeError, tarfile.TarError) as error:
                 last_error = str(error)
+                print(f"Temurin download attempt failed: {error}", file=sys.stderr)
                 continue
 
-            extract_dir = Path(tmp) / "extract"
-            extract_dir.mkdir()
-            try:
-                with tarfile.open(archive, "r:gz") as tar:
-                    tar.extractall(extract_dir)
-            except (tarfile.TarError, OSError) as error:
-                last_error = str(error)
-                continue
-
-            children = [path for path in extract_dir.iterdir() if path.is_dir()]
-            if not children:
-                last_error = "archive had no top-level directory"
-                continue
-            payload = children[0]
             if target.exists():
                 shutil.rmtree(target)
             shutil.move(str(payload), str(target))
+            # World-executable so minebox/minecraft service users can run it.
+            for path in target.rglob("*"):
+                try:
+                    if path.is_dir():
+                        path.chmod(0o755)
+                    elif path.name == "java" or path.suffix == ".so":
+                        path.chmod(0o755)
+                    else:
+                        path.chmod(0o644)
+                except OSError:
+                    pass
             java = target / "bin" / "java"
             if java.is_file():
                 os.chmod(java, 0o755)
@@ -213,23 +239,25 @@ def ensure(min_major: int, max_major: int | None = None) -> str:
         print(existing)
         return existing
 
-    # Choose an install target inside the allowed band.
+    if os.geteuid() != 0:
+        raise SystemExit(
+            "Root privileges are required to install a missing Java runtime. "
+            "Update MineBox (Install Update), or run this script with sudo."
+        )
+
     if max_major is not None and min_major <= 8:
         target_major = 8
-    elif max_major is not None and max_major <= 11:
-        target_major = 11
     elif max_major is not None and max_major <= 16:
         target_major = 11
     else:
         target_major = min_major
 
     apt_packages = [f"openjdk-{target_major}-jre-headless"]
-    if target_major >= 17:
-        apt_packages.append(f"openjdk-{target_major}-jdk-headless")
-
     print(
-        f"Installing Java {target_major} for MineBox (min={min_major}, "
-        f"max={max_major})...",
+        f"Installing Java {target_major} for MineBox "
+        f"(need {min_major}"
+        + (f"-{max_major}" if max_major is not None else "+")
+        + ")...",
         file=sys.stderr,
     )
     _apt_install(apt_packages)
@@ -239,7 +267,6 @@ def ensure(min_major: int, max_major: int | None = None) -> str:
         print(existing)
         return existing
 
-    # Bookworm often has no OpenJDK 8 — fetch Temurin.
     java = _download_temurin(target_major)
     major = _java_major(java)
     if major is None or major < min_major or (
@@ -274,14 +301,19 @@ def main() -> int:
         print(path)
         return 0
 
-    if os.geteuid() != 0 and not find_java(args.min, maximum):
-        print(
-            "Root privileges are required to install a missing Java runtime.",
-            file=sys.stderr,
-        )
-        return 2
-
-    ensure(args.min, maximum)
+    try:
+        ensure(args.min, maximum)
+    except SystemExit as error:
+        message = error.args[0] if error.args else str(error)
+        if message and message not in {"0", "1"}:
+            print(message, file=sys.stderr)
+        code = error.code
+        if isinstance(code, int):
+            return code
+        return 1
+    except Exception as error:  # noqa: BLE001
+        print(str(error), file=sys.stderr)
+        return 1
     return 0
 
 

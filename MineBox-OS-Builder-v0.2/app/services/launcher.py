@@ -88,7 +88,7 @@ def _java_major_version(java: str) -> int | None:
 
 
 def _ensure_java_installed(version: str) -> None:
-    """Install Java 8/16/17/21 as needed (Temurin fallback for missing apt pkgs)."""
+    """Install Java 8/17/21 as needed (Temurin fallback for missing apt pkgs)."""
     required = _required_java_major(version)
     maximum = _max_java_major(version)
     script = Path(__file__).resolve().parents[1] / "scripts" / "minebox_ensure_java.py"
@@ -104,11 +104,13 @@ def _ensure_java_installed(version: str) -> None:
             "sudo",
             "-n",
             "/usr/bin/python3",
-            str(script),
+            "/opt/minebox/scripts/minebox_ensure_java.py",
             "--min",
             str(required),
         ],
         [
+            "sudo",
+            "-n",
             "/usr/bin/python3",
             str(script),
             "--min",
@@ -119,6 +121,7 @@ def _ensure_java_installed(version: str) -> None:
         for command in helpers:
             command.extend(["--max", str(maximum)])
 
+    errors: list[str] = []
     for command in helpers:
         try:
             result = subprocess.run(
@@ -128,13 +131,23 @@ def _ensure_java_installed(version: str) -> None:
                 text=True,
                 timeout=900,
             )
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, subprocess.SubprocessError) as error:
+            errors.append(f"{command[0]}: {error}")
             continue
-        if result.returncode == 0 and (result.stdout or "").strip():
+        stdout = (result.stdout or "").strip()
+        stderr = (result.stderr or "").strip()
+        if result.returncode == 0 and stdout:
             return
-        # Rootless no-op when already present.
         if result.returncode == 0:
             return
+        detail = stderr or stdout or f"exit {result.returncode}"
+        errors.append(f"{' '.join(command[:4])}... -> {detail[:300]}")
+
+    if errors:
+        raise RuntimeError(
+            "Automatic Java install failed. "
+            + " | ".join(errors[:2])
+        )
 
 
 def _find_java(version: str) -> str:
@@ -174,7 +187,15 @@ def _find_java(version: str) -> str:
     if found:
         return found
 
-    _ensure_java_installed(version)
+    try:
+        _ensure_java_installed(version)
+    except RuntimeError as error:
+        raise RuntimeError(
+            f"Minecraft {version} needs Java {required}"
+            + (f"-{maximum}" if maximum is not None and maximum != required else "")
+            + f". {error}"
+        ) from error
+
     found = _scan()
     if found:
         return found
@@ -183,7 +204,7 @@ def _find_java(version: str) -> str:
         raise RuntimeError(
             f"Minecraft {version} needs Java {required}"
             + (f"-{maximum}" if maximum != required else "")
-            + ". MineBox could not install it automatically. "
+            + ". Install still did not provide a usable runtime. "
             f"On the Pi run: sudo python3 /opt/minebox/scripts/minebox_ensure_java.py "
             f"--min {required}"
             + (f" --max {maximum}" if maximum is not None else "")

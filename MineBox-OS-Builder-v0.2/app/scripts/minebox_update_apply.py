@@ -352,6 +352,14 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
                 "/usr/local/sbin/minebox-ensure-java",
             ]
         )
+        # Preinstall Java 8 during OTA — Bookworm has no apt package and Forge
+        # 1.12 needs it. Other majors install on demand via sudo.
+        print("Ensuring Java 8 runtime for legacy Forge...", flush=True)
+        subprocess.run(
+            ["/usr/bin/python3", str(java_script), "--min", "8", "--max", "8"],
+            check=False,
+            timeout=900,
+        )
 
     # LAN discovery (.local) + optional UPnP helper for internet joins.
     subprocess.run(
@@ -380,6 +388,7 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
         )
 
     sudoers = Path("/etc/sudoers.d/minebox")
+    # No args list => any arguments allowed (needed for --min/--max).
     desired = (
         "minebox ALL=(root) NOPASSWD: "
         "/usr/bin/systemctl start minecraft.service, "
@@ -397,8 +406,8 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
         "/usr/local/sbin/minebox-fix-minecraft-perms, "
         "/usr/bin/python3 /opt/minebox/scripts/minebox_install_avahi.py, "
         "/usr/local/sbin/minebox-install-avahi, "
-        "/usr/bin/python3 /opt/minebox/scripts/minebox_ensure_java.py *, "
-        "/usr/local/sbin/minebox-ensure-java *, "
+        "/usr/bin/python3 /opt/minebox/scripts/minebox_ensure_java.py, "
+        "/usr/local/sbin/minebox-ensure-java, "
         "/usr/bin/systemctl poweroff, "
         "/usr/bin/systemctl reboot\n"
     )
@@ -406,22 +415,22 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
         current = sudoers.read_text(encoding="utf-8") if sudoers.is_file() else ""
     except OSError:
         current = ""
-    if (
-        "minebox_fix_minecraft_perms" not in current
-        or "hostapd.service" not in current
-        or "minebox_install_avahi" not in current
-        or "minebox_ensure_java" not in current
-        or "minebox-ensure-java" not in current
-    ):
+    if current.strip() != desired.strip():
         sudoers.write_text(desired, encoding="utf-8")
         os.chmod(sudoers, 0o440)
-        subprocess.run(
+        check = subprocess.run(
             ["visudo", "-cf", str(sudoers)],
             check=False,
             capture_output=True,
             text=True,
             timeout=30,
         )
+        if check.returncode != 0:
+            print(
+                "warning: sudoers validation failed: "
+                + (check.stderr or check.stdout or ""),
+                flush=True,
+            )
 
 
 def preserve_persistent_state(previous: Path, target: Path, log_file: Path) -> None:
