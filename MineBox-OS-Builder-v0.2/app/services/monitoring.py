@@ -490,40 +490,64 @@ def system_status() -> dict[str, float | str | None]:
         from services import minecraft
 
         if not minecraft.is_running():
-            crash = diagnostics.latest_crash_summary()
-            hint = ""
+            # Intentional stops (dashboard Stop / systemctl stop) are not crashes.
+            stopped_cleanly = False
             try:
-                hint = minecraft._recent_failure_hint()
+                stopped_cleanly = minecraft._stopped_cleanly_recently()
             except Exception:
+                stopped_cleanly = False
+
+            if not stopped_cleanly:
+                crash = diagnostics.latest_crash_summary()
                 hint = ""
-            crash_looks_real = (
-                crash
-                and "no crash reports" not in crash.lower()
-            )
-            if crash_looks_real or (
-                hint
-                and any(
-                    token in hint.lower()
+                try:
+                    hint = minecraft._recent_failure_hint()
+                except Exception:
+                    hint = ""
+                crash_looks_real = (
+                    crash
+                    and "no crash reports" not in crash.lower()
+                )
+                hint_body = hint
+                for prefix in (" last error:", " last detail:"):
+                    if hint_body.lower().startswith(prefix):
+                        hint_body = hint_body[len(prefix) :].strip()
+                        break
+                hint_looks_real = hint_body and any(
+                    token in hint_body.lower()
                     for token in (
-                        "error",
                         "exception",
-                        "failed",
-                        "crash",
+                        "unsupportedclassversion",
                         "outofmemory",
+                        "could not find",
+                        "unable to access",
+                        "minebox launcher error",
+                        "needs java",
+                        "invalid or corrupt",
+                        "failed",
+                        "crash report",
+                    )
+                ) and not any(
+                    token in hint_body.lower()
+                    for token in (
+                        "rcon client",
+                        "shutting down",
+                        "cwd=",
+                        "saved the game",
                     )
                 )
-            ):
-                detail = hint or crash
-                alerts.append(
-                    {
-                        "id": "server_crashed",
-                        "level": "error",
-                        "message": (
-                            "Minecraft looks like it crashed or failed to stay up. "
-                            f"{detail[:220]}"
-                        ),
-                    }
-                )
+                if crash_looks_real or hint_looks_real:
+                    detail = hint or crash
+                    alerts.append(
+                        {
+                            "id": "server_crashed",
+                            "level": "error",
+                            "message": (
+                                "Minecraft looks like it crashed or failed to stay up. "
+                                f"{detail[:220]}"
+                            ),
+                        }
+                    )
     except Exception:
         pass
 

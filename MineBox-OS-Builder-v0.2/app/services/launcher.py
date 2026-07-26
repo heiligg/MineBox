@@ -3,57 +3,260 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 from services import servers
 
+# Class-file major → Java major is (class_major - 44) for modern JDKs.
+_CLASS_FILE_MAGIC = b"\xca\xfe\xba\xbe"
+
 
 def _version_tuple(version: str) -> tuple[int, ...]:
     parts: list[int] = []
-    for piece in version.split("."):
+    for piece in re.split(r"[.\-+_]", version.strip()):
         digits = "".join(character for character in piece if character.isdigit())
         if not digits:
-            break
+            if parts:
+                break
+            continue
         parts.append(int(digits))
     return tuple(parts)
 
 
-def _required_java_major(version: str) -> int:
-    parsed = _version_tuple(version)
-    # Mojang calendar-style IDs (25.x / 26.x / …) are not classic 1.x versions.
-    # Minecraft 26.x ships class-file 69 → needs Java 25+.
-    if parsed and parsed[0] >= 25 and parsed[0] < 100:
-        return 25
-    if parsed and parsed <= (1, 16, 5):
+def _java_from_class_major(class_major: int) -> int:
+    if class_major <= 52:
         return 8
-    if parsed and parsed < (1, 20, 5):
-        return 17
+    return max(8, class_major - 44)
+
+
+def _probe_class_bytes(data: bytes) -> int | None:
+    if len(data) < 8 or data[:4] != _CLASS_FILE_MAGIC:
+        return None
+    return int(struct.unpack(">H", data[6:8])[0])
+
+
+def _probe_jar_required_java(jar: Path, *, sample_limit: int = 120) -> int | None:
+    """Return the minimum Java major implied by a jar (any loader)."""
+    try:
+        with zipfile.ZipFile(jar) as archive:
+            names = archive.namelist()
+    except (OSError, zipfile.BadZipFile):
+        return None
+
+    required: int | None = None
+
+    # Multi-release jars advertise the Java major under META-INF/versions/N/.
+    for name in names:
+        match = re.match(r"META-INF/versions/(\d+)/", name)
+        if not match:
+            continue
+        major = int(match.group(1))
+        required = max(required or 0, major)
+
+    preferred_prefixes = (
+        "net/minecraft/",
+        "com/mojang/",
+        "net/fabricmc/",
+        "io/papermc/",
+        "com/destroystokyo/",
+        "net/minecraftforge/",
+        "net/neoforged/",
+        "cpw/mods/",
+    )
+    class_names = [name for name in names if name.endswith(".class")]
+    ranked: list[str] = []
+    for prefix in preferred_prefixes:
+        ranked.extend(name for name in class_names if name.startswith(prefix))
+    ranked.extend(name for name in class_names if name not in ranked)
+
+    checked = 0
+    try:
+        with zipfile.ZipFile(jar) as archive:
+            for name in ranked:
+                if checked >= sample_limit:
+                    break
+                # Skip MR copies; the versions/ folder already raised the floor.
+                if name.startswith("META-INF/versions/"):
+                    continue
+                try:
+                    class_major = _probe_class_bytes(archive.read(name))
+                except (OSError, KeyError, zipfile.BadZipFile):
+                    continue
+                checked += 1
+                if class_major is None:
+                    continue
+                java_major = _java_from_class_major(class_major)
+                required = max(required or 0, java_major)
+    except (OSError, zipfile.BadZipFile):
+        return required
+
+    return required
+
+
+def _jars_for_java_probe(server_dir: Path) -> list[Path]:
+    jars: list[Path] = []
+    seen: set[Path] = set()
+
+    def _add(path: Path) -> None:
+        try:
+            resolved = path.resolve()
+        except OSError:
+            return
+        if resolved in seen or not path.is_file():
+            return
+        if path.suffix.lower() != ".jar":
+            return
+        name = path.name.lower()
+        if "installer" in name:
+            return
+        seen.add(resolved)
+        jars.append(path)
+
+    for name in (
+        "fabric-server-launch.jar",
+        "paper.jar",
+        "purpur.jar",
+        "server.jar",
+        "minecraft_server.jar",
+    ):
+        _add(server_dir / name)
+
+    for pattern in (
+        "forge-*.jar",
+        "neoforge-*.jar",
+        "paper-*.jar",
+        "purpur-*.jar",
+        "minecraft_server.*.jar",
+        "fabric-server-launch-*.jar",
+    ):
+        for path in sorted(server_dir.glob(pattern)):
+            _add(path)
+
+    versions_dir = server_dir / "versions"
+    if versions_dir.is_dir():
+        for path in sorted(versions_dir.rglob("*.jar")):
+            _add(path)
+
+    for relative in (
+        Path("libraries") / "net" / "minecraft",
+        Path("libraries") / "net" / "fabricmc",
+        Path("libraries") / "io" / "papermc",
+        Path("libraries") / "net" / "minecraftforge",
+        Path("libraries") / "net" / "neoforged",
+    ):
+        root = server_dir / relative
+        if not root.is_dir():
+            continue
+        # Newest jars tend to sort last by path; keep a small tail.
+        matches = sorted(root.rglob("*.jar"))
+        for path in matches[-12:]:
+            _add(path)
+
+    return jars
+
+
+def _probe_server_required_java(server_dir: Path | None) -> int | None:
+    if server_dir is None or not server_dir.is_dir():
+        return None
+    required: int | None = None
+    for jar in _jars_for_java_probe(server_dir):
+        found = _probe_jar_required_java(jar)
+        if found is None:
+            continue
+        required = max(required or 0, found)
+    return required
+
+
+def _required_java_from_version(version: str) -> int:
+    """Heuristic floor from the Minecraft version string (loader-agnostic)."""
+    parsed = _version_tuple(version)
+    if not parsed:
+        return 21
+
+    # Mojang calendar IDs (25.x / 26.x / …). Not classic 1.x.
+    # Observed: Minecraft 26.2 → class-file 69 → Java 25, so year N ≈ Java N-1.
+    if parsed[0] >= 25 and parsed[0] < 100:
+        return max(21, parsed[0] - 1)
+
+    # Classic 1.x line (Vanilla / Paper / Fabric / Forge / NeoForge).
+    if parsed[0] == 1:
+        if parsed <= (1, 16, 5):
+            return 8
+        if parsed < (1, 18):
+            return 16  # 1.17.x
+        if parsed < (1, 20, 5):
+            return 17
+        return 21
+
+    # Unknown scheme — prefer a modern LTS floor.
     return 21
 
 
-def _max_java_major(version: str) -> int | None:
-    """Old LaunchWrapper Forge breaks on Java 9+ with ClassCastException."""
+def _required_java_major(
+    version: str,
+    server_dir: Path | None = None,
+) -> int:
+    heuristic = _required_java_from_version(version)
+    probed = _probe_server_required_java(server_dir)
+    if probed is None:
+        return heuristic
+    # Take the higher floor so a thin launcher jar cannot under-report.
+    return max(heuristic, probed)
+
+
+def _max_java_major(version: str, loader: str | None = None) -> int | None:
+    """Upper bound when an old runtime stack breaks on newer JDKs."""
+    del loader  # Reserved for loader-specific caps later.
     parsed = _version_tuple(version)
+
     if parsed and parsed[0] >= 25 and parsed[0] < 100:
         return None
+
+    # LaunchWrapper-era servers (≤1.12.2) die on Java 9+.
     if parsed and parsed <= (1, 12, 2):
         return 8
+
+    # Pre-1.17 jars commonly break on Java 17+.
     if parsed and parsed < (1, 17):
         return 16
     return None
 
 
-def _java_candidates(version: str) -> list[str]:
+def _discover_installed_javas() -> list[str]:
+    found: list[str] = []
+    seen: set[str] = set()
+    roots = (Path("/opt/java"), Path("/usr/lib/jvm"))
+    patterns = ("*/bin/java", "*/jre/bin/java")
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for pattern in patterns:
+            try:
+                matches = root.glob(pattern)
+            except OSError:
+                continue
+            for path in matches:
+                if not (path.is_file() and os.access(path, os.X_OK)):
+                    continue
+                resolved = str(path)
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                found.append(resolved)
+    return found
+
+
+def _java_candidates(required: int, maximum: int | None) -> list[str]:
     configured = os.environ.get("MINEBOX_JAVA")
     candidates: list[str] = [configured] if configured else []
-    major = _required_java_major(version)
-    maximum = _max_java_major(version)
     if maximum is None:
-        majors = list(range(major, major + 3))
+        majors = list(range(required, required + 8))
     else:
-        majors = list(range(major, maximum + 1))
+        majors = list(range(required, maximum + 1))
 
     for value in majors:
         candidates.extend(
@@ -69,6 +272,7 @@ def _java_candidates(version: str) -> list[str]:
             ]
         )
 
+    candidates.extend(_discover_installed_javas())
     candidates.append("java")
     return candidates
 
@@ -97,10 +301,8 @@ def _java_major_version(java: str) -> int | None:
     return int(ver.split(".")[0])
 
 
-def _ensure_java_installed(version: str) -> None:
-    """Install Java 8/17/21 as needed (Temurin fallback for missing apt pkgs)."""
-    required = _required_java_major(version)
-    maximum = _max_java_major(version)
+def _ensure_java_installed(required: int, maximum: int | None) -> None:
+    """Install a compatible JDK (apt first, Temurin fallback)."""
     script = Path(__file__).resolve().parents[1] / "scripts" / "minebox_ensure_java.py"
     helpers = [
         [
@@ -160,16 +362,31 @@ def _ensure_java_installed(version: str) -> None:
         )
 
 
-def _find_java(version: str) -> str:
-    required = _required_java_major(version)
-    maximum = _max_java_major(version)
+def _java_need_label(version: str, required: int, maximum: int | None) -> str:
+    if maximum is not None and maximum != required:
+        return f"Minecraft {version} needs Java {required}-{maximum}"
+    if maximum is not None:
+        return f"Minecraft {version} needs Java {required}"
+    return f"Minecraft {version} needs Java {required}+"
+
+
+def _find_java(
+    version: str,
+    server_dir: Path | None = None,
+    loader: str | None = None,
+) -> str:
+    required = _required_java_major(version, server_dir=server_dir)
+    maximum = _max_java_major(version, loader=loader)
+    if maximum is not None and required > maximum:
+        required = maximum
 
     def _scan() -> str | None:
         compatible: list[tuple[int, str]] = []
-        for candidate in _java_candidates(version):
+        seen: set[str] = set()
+        for candidate in _java_candidates(required, maximum):
             if not candidate:
                 continue
-            if "/" in candidate:
+            if "/" in candidate or candidate.startswith("\\"):
                 path = Path(candidate)
                 if not (path.is_file() and os.access(path, os.X_OK)):
                     continue
@@ -179,6 +396,9 @@ def _find_java(version: str) -> str:
                 if not found:
                     continue
                 resolved = found
+            if resolved in seen:
+                continue
+            seen.add(resolved)
 
             major = _java_major_version(resolved)
             if major is None:
@@ -190,7 +410,9 @@ def _find_java(version: str) -> str:
             compatible.append((major, resolved))
         if not compatible:
             return None
-        compatible.sort(key=lambda item: item[0], reverse=True)
+        # Prefer the oldest compatible runtime so a Java 25 install for modern
+        # Fabric/Paper does not get reused for 1.16–1.20 servers that break on it.
+        compatible.sort(key=lambda item: item[0])
         return compatible[0][1]
 
     found = _scan()
@@ -198,13 +420,9 @@ def _find_java(version: str) -> str:
         return found
 
     try:
-        _ensure_java_installed(version)
+        _ensure_java_installed(required, maximum)
     except RuntimeError as error:
-        raise RuntimeError(
-            f"Minecraft {version} needs Java {required}"
-            + (f"-{maximum}" if maximum is not None and maximum != required else "")
-            + f". {error}"
-        ) from error
+        raise RuntimeError(f"{_java_need_label(version, required, maximum)}. {error}") from error
 
     found = _scan()
     if found:
@@ -212,9 +430,8 @@ def _find_java(version: str) -> str:
 
     if maximum is not None:
         raise RuntimeError(
-            f"Minecraft {version} needs Java {required}"
-            + (f"-{maximum}" if maximum != required else "")
-            + ". Install still did not provide a usable runtime. "
+            f"{_java_need_label(version, required, maximum)}. "
+            "Install still did not provide a usable runtime. "
             f"On the Pi run: sudo python3 /opt/minebox/scripts/minebox_ensure_java.py "
             f"--min {required}"
             + (f" --max {maximum}" if maximum is not None else "")
@@ -481,7 +698,11 @@ def ensure_runtime_for_active() -> str:
     instance = servers.active_server()
     if instance is None:
         raise RuntimeError("No active Minecraft server is selected.")
-    return _find_java(instance.version)
+    return _find_java(
+        instance.version,
+        server_dir=Path(instance.directory),
+        loader=instance.loader,
+    )
 
 
 def build_command() -> tuple[Path, list[str], dict[str, str] | None]:
@@ -510,7 +731,11 @@ def build_command() -> tuple[Path, list[str], dict[str, str] | None]:
     except Exception:
         pass
 
-    java = _find_java(instance.version)
+    java = _find_java(
+        instance.version,
+        server_dir=server_dir,
+        loader=instance.loader,
+    )
     forge_command = _forge_command(server_dir, instance, java)
     if forge_command is not None:
         _write_launch_record(server_dir, forge_command, java)

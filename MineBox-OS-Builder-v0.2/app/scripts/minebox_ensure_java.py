@@ -1,9 +1,9 @@
 #!/usr/bin/python3
-"""Ensure a compatible Java runtime exists for a Minecraft / Forge version.
+"""Ensure a compatible Java runtime exists for any Minecraft loader/version.
 
 Runs as root (sudo / update apply) when the needed JDK is missing.
 Uses apt when packages exist; otherwise downloads Eclipse Temurin from Adoptium
-into /opt/java (needed for Java 8 on Debian Bookworm / Raspberry Pi OS).
+into /opt/java (needed for older JDKs or when apt has no matching package).
 """
 from __future__ import annotations
 
@@ -94,13 +94,50 @@ def _candidate_paths(major: int) -> list[Path]:
     which = shutil.which("java")
     if which:
         paths.append(Path(which))
+    which_n = shutil.which(f"java{major}")
+    if which_n:
+        paths.append(Path(which_n))
     return paths
+
+
+def _discover_installed_javas() -> list[Path]:
+    found: list[Path] = []
+    seen: set[str] = set()
+    for root in (JAVA_ROOT, Path("/usr/lib/jvm")):
+        if not root.is_dir():
+            continue
+        for pattern in ("*/bin/java", "*/jre/bin/java"):
+            try:
+                matches = root.glob(pattern)
+            except OSError:
+                continue
+            for path in matches:
+                resolved = str(path)
+                if resolved in seen:
+                    continue
+                if not path.is_file() or not os.access(path, os.X_OK):
+                    continue
+                seen.add(resolved)
+                found.append(path)
+    return found
 
 
 def find_java(min_major: int, max_major: int | None = None) -> str | None:
     found: list[tuple[int, str]] = []
     seen: set[str] = set()
-    for path in _candidate_paths(min_major):
+
+    if max_major is not None:
+        majors = list(range(min_major, max_major + 1))
+    else:
+        # Look ahead several releases so Java 25 satisfies a "21+" request.
+        majors = list(range(min_major, min_major + 10))
+
+    candidates: list[Path] = []
+    for major in majors:
+        candidates.extend(_candidate_paths(major))
+    candidates.extend(_discover_installed_javas())
+
+    for path in candidates:
         resolved = str(path)
         if resolved in seen:
             continue
@@ -117,7 +154,8 @@ def find_java(min_major: int, max_major: int | None = None) -> str | None:
         found.append((major, resolved))
     if not found:
         return None
-    found.sort(key=lambda item: item[0], reverse=True)
+    # Prefer the oldest compatible runtime (exact floor when available).
+    found.sort(key=lambda item: item[0])
     return found[0][1]
 
 

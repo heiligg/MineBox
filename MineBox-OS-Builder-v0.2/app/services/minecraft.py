@@ -197,6 +197,51 @@ def _dev_stop() -> CommandResult:
 
 def _recent_failure_hint() -> str:
     """Best-effort crash reason from launcher log, latest.log, or journal."""
+    failure_tokens = (
+        "error",
+        "exception",
+        "unsupportedclassversion",
+        "outofmemory",
+        "could not find or load",
+        "unable to access jarfile",
+        "unable to access",
+        "minebox launcher error",
+        "minebox launcher",
+        "failed",
+        "needs java",
+        "invalid or corrupt",
+        "crash report",
+    )
+    # Normal lifecycle / RCON chatter that must never count as a crash.
+    benign_tokens = (
+        "rcon client",
+        "rcon listener",
+        "shutting down",
+        "thread rcon",
+        "saved the game",
+        "all chunks are saved",
+        "all dimensions are saved",
+        "stopping minecraft.service",
+        "stopped minecraft.service",
+        "deactivated successfully",
+        "consumed ",
+        "cwd=",
+        "java=",
+        "command=",
+    )
+
+    def _is_benign(line: str) -> bool:
+        lower = line.lower()
+        return any(token in lower for token in benign_tokens)
+
+    def _is_failure(line: str) -> bool:
+        lower = line.lower()
+        if _is_benign(line):
+            return False
+        if "failed with result" in lower:
+            return False
+        return any(token in lower for token in failure_tokens)
+
     hints: list[str] = []
     server_dir = _active_server_dir()
     if server_dir is not None:
@@ -215,31 +260,13 @@ def _recent_failure_hint() -> str:
             useful = [line.strip() for line in lines if line.strip()]
             if not useful:
                 continue
-            # Prefer the last meaningful error-looking line; else last line.
-            chosen = useful[-1]
-            for line in reversed(useful[-80:]):
-                lower = line.lower()
-                if any(
-                    token in lower
-                    for token in (
-                        "error",
-                        "exception",
-                        "unsupportedclassversion",
-                        "outofmemory",
-                        "could not find or load",
-                        "unable to access jarfile",
-                        "minebox launcher",
-                        "failed",
-                        "needs java",
-                        "invalid or corrupt",
-                    )
-                ):
+            chosen = None
+            for line in reversed(useful[-120:]):
+                if _is_failure(line):
                     chosen = line
                     break
-            # Skip useless systemd summary lines if we have better detail.
-            if "failed with result" in chosen.lower() and len(useful) > 1:
-                continue
-            hints.append(chosen[:300])
+            if chosen:
+                hints.append(chosen[:300])
 
     journal = run(
         [
@@ -259,23 +286,7 @@ def _recent_failure_hint() -> str:
             stripped = line.strip()
             if not stripped:
                 continue
-            lower = stripped.lower()
-            if "failed with result" in lower:
-                continue
-            if any(
-                token in lower
-                for token in (
-                    "error",
-                    "exception",
-                    "unsupportedclassversion",
-                    "outofmemory",
-                    "unable to access",
-                    "minebox launcher",
-                    "needs java",
-                    "could not find",
-                    "invalid or corrupt",
-                )
-            ):
+            if _is_failure(stripped):
                 hints.append(stripped[:300])
                 break
 
@@ -288,7 +299,46 @@ def _recent_failure_hint() -> str:
     for item in hints:
         if item not in unique:
             unique.append(item)
-    return " Last error: " + " | ".join(unique[:2])
+    return " Last detail: " + " | ".join(unique[:2])
+
+
+def _stopped_cleanly_recently() -> bool:
+    """True when the service was stopped on purpose (not a crash)."""
+    journal = run(
+        [
+            "journalctl",
+            "-u",
+            SERVICE_NAME,
+            "-n",
+            "40",
+            "--no-pager",
+            "-o",
+            "cat",
+        ],
+        timeout=15,
+    )
+    if not journal.ok or not journal.stdout:
+        return False
+    lines = [line.strip() for line in journal.stdout.splitlines() if line.strip()]
+    if not lines:
+        return False
+    tail = "\n".join(lines[-15:]).lower()
+    clean_markers = (
+        "stopped minecraft.service",
+        "deactivated successfully",
+        "stopping minecraft.service",
+    )
+    crash_markers = (
+        "failed with result",
+        "main process exited",
+        "exception",
+        "unsupportedclassversion",
+        "outofmemory",
+        "minebox launcher error",
+    )
+    if any(marker in tail for marker in crash_markers):
+        return False
+    return any(marker in tail for marker in clean_markers)
 
 
 def start() -> CommandResult:
