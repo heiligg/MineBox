@@ -294,6 +294,16 @@ def _recent_failure_hint() -> str:
 def start() -> CommandResult:
     if is_running():
         return CommandResult(True, "Minecraft is already running.")
+    # Forge/Minecraft often regenerate server.properties and wipe RCON on first
+    # boot — repair credentials before every start so console/settings work.
+    try:
+        from services import rcon as rcon_service
+
+        active = servers.active_server()
+        if active is not None:
+            rcon_service.ensure_properties(Path(active.directory))
+    except Exception:
+        pass
     # Install matching Java (8/17/21) before systemd start so long downloads
     # are not killed by service start timeouts.
     try:
@@ -729,6 +739,12 @@ def save_server_settings(payload: dict[str, object]) -> dict[str, object]:
             "path": str(properties_path),
             "settings": {},
         }
+
+    # Settings saves must not leave RCON disabled (Forge/vanilla rewrites).
+    try:
+        rcon.ensure_properties(properties_path.parent)
+    except Exception:
+        pass
 
     # Keep the MineBox server registry in sync with the game port / MOTD.
     try:

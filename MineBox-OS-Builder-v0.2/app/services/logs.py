@@ -46,11 +46,20 @@ def latest_lines(line_count: int = 100) -> dict:
     path = minecraft_log_path()
 
     if path is None:
+        active = servers.active_server()
+        expected = (
+            str(Path(active.directory) / "logs" / "latest.log")
+            if active is not None
+            else None
+        )
         return {
             "available": False,
-            "path": None,
+            "path": expected,
             "lines": [],
-            "message": "Minecraft log is not available on this system.",
+            "message": (
+                "Minecraft log is not available yet. Start the server and wait "
+                "a few seconds for logs/latest.log to appear."
+            ),
         }
 
     try:

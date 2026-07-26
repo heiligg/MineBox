@@ -492,6 +492,14 @@ def build_command() -> tuple[Path, list[str], dict[str, str] | None]:
     if "eula=true" not in text.lower():
         eula.write_text("eula=true\n", encoding="utf-8")
 
+    # Keep RCON enabled — Forge first-run often strips it from server.properties.
+    try:
+        from services import rcon as rcon_service
+
+        rcon_service.ensure_properties(server_dir)
+    except Exception:
+        pass
+
     java = _find_java(instance.version)
     forge_command = _forge_command(server_dir, instance, java)
     if forge_command is not None:

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import secrets
 from pathlib import Path
 
 from services.servers import ServerInstance
@@ -16,6 +15,8 @@ def install_directory(instance: ServerInstance) -> Path:
 
 
 def _get_or_create_rcon_password(server_dir: Path) -> str:
+    from config import RCON_PASSWORD
+
     password_file = server_dir / ".minebox-rcon-password"
 
     if password_file.exists():
@@ -23,9 +24,13 @@ def _get_or_create_rcon_password(server_dir: Path) -> str:
         if password:
             return password
 
-    password = secrets.token_urlsafe(24)
+    # Keep dashboard RCON in sync with config / Forge rewrites.
+    password = RCON_PASSWORD
     password_file.write_text(password + "\n", encoding="utf-8")
-    os.chmod(password_file, 0o600)
+    try:
+        os.chmod(password_file, 0o600)
+    except OSError:
+        pass
     return password
 
 
