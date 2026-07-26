@@ -562,6 +562,16 @@ def save_server_settings(payload: dict[str, object]) -> dict[str, object]:
             updated[key] = value
 
     current = read_server_settings()
+    try:
+        from services import join_access
+
+        port_value = current.get("settings", {}).get("server-port")
+        join_access.ensure_avahi_advertisement(
+            int(port_value) if port_value is not None else None
+        )
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "message": (

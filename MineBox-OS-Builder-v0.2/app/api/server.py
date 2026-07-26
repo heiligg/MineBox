@@ -7,6 +7,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from api.routes import backups
 from api.routes import console_command
+from api.routes import join
 from api.routes import network
 from api.routes import update
 from api.routes.auth import router as auth_router
@@ -64,6 +65,7 @@ app.include_router(console_command.router)
 app.include_router(backups.router)
 app.include_router(network.router)
 app.include_router(update.router)
+app.include_router(join.router)
 
 
 @app.get("/docs-home", include_in_schema=False)

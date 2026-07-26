@@ -308,6 +308,45 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
             ]
         )
 
+    avahi_script = target / "scripts" / "minebox_install_avahi.py"
+    if avahi_script.is_file():
+        run(["chmod", "0755", str(avahi_script)])
+        run(
+            [
+                "install",
+                "-m",
+                "0755",
+                str(avahi_script),
+                "/usr/local/sbin/minebox-install-avahi",
+            ]
+        )
+
+    # LAN discovery (.local) + optional UPnP helper for internet joins.
+    subprocess.run(
+        [
+            "apt-get",
+            "install",
+            "-y",
+            "avahi-daemon",
+            "libnss-mdns",
+            "miniupnpc",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=300,
+    )
+
+    if avahi_script.is_file():
+        run(["/usr/bin/python3", str(avahi_script), "--port", "25565"], timeout=30)
+        subprocess.run(
+            ["systemctl", "enable", "--now", "avahi-daemon.service"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
     sudoers = Path("/etc/sudoers.d/minebox")
     desired = (
         "minebox ALL=(root) NOPASSWD: "
@@ -319,8 +358,13 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
         "/usr/bin/systemctl start hostapd.service, "
         "/usr/bin/systemctl stop dnsmasq.service, "
         "/usr/bin/systemctl start dnsmasq.service, "
+        "/usr/bin/systemctl enable avahi-daemon.service, "
+        "/usr/bin/systemctl start avahi-daemon.service, "
+        "/usr/bin/systemctl try-reload-or-restart avahi-daemon.service, "
         "/usr/bin/python3 /opt/minebox/scripts/minebox_fix_minecraft_perms.py, "
         "/usr/local/sbin/minebox-fix-minecraft-perms, "
+        "/usr/bin/python3 /opt/minebox/scripts/minebox_install_avahi.py, "
+        "/usr/local/sbin/minebox-install-avahi, "
         "/usr/bin/systemctl poweroff, "
         "/usr/bin/systemctl reboot\n"
     )
@@ -331,6 +375,7 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
     if (
         "minebox_fix_minecraft_perms" not in current
         or "hostapd.service" not in current
+        or "minebox_install_avahi" not in current
     ):
         sudoers.write_text(desired, encoding="utf-8")
         os.chmod(sudoers, 0o440)
