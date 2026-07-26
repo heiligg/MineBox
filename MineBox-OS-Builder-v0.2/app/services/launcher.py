@@ -16,8 +16,12 @@ _CLASS_FILE_MAGIC = b"\xca\xfe\xba\xbe"
 
 
 def _version_tuple(version: str) -> tuple[int, ...]:
+    text = (version or "").strip()
+    # Week snapshots like 25w14a are not dotted versions — do not parse as 2514.
+    if re.match(r"^\d{2}w\d{2}[a-z]?$", text, re.I):
+        return ()
     parts: list[int] = []
-    for piece in re.split(r"[.\-+_]", version.strip()):
+    for piece in re.split(r"[.\-+_]", text):
         digits = "".join(character for character in piece if character.isdigit())
         if not digits:
             if parts:
@@ -25,6 +29,13 @@ def _version_tuple(version: str) -> tuple[int, ...]:
             continue
         parts.append(int(digits))
     return tuple(parts)
+
+
+def _week_snapshot_year(version: str) -> int | None:
+    match = re.match(r"^(\d{2})w\d{2}[a-z]?$", (version or "").strip(), re.I)
+    if not match:
+        return None
+    return int(match.group(1))
 
 
 def _java_from_class_major(class_major: int) -> int:
@@ -173,6 +184,13 @@ def _probe_server_required_java(server_dir: Path | None) -> int | None:
 
 def _required_java_from_version(version: str) -> int:
     """Heuristic floor from the Minecraft version string (loader-agnostic)."""
+    week_year = _week_snapshot_year(version)
+    if week_year is not None:
+        # 24w/25w stayed on the Java 21 line; 26w+ tracks calendar (N → Java N-1).
+        if week_year >= 26:
+            return max(21, week_year - 1)
+        return 21
+
     parsed = _version_tuple(version)
     if not parsed:
         return 21
@@ -211,6 +229,10 @@ def _required_java_major(
 def _max_java_major(version: str, loader: str | None = None) -> int | None:
     """Upper bound when an old runtime stack breaks on newer JDKs."""
     del loader  # Reserved for loader-specific caps later.
+
+    if _week_snapshot_year(version) is not None:
+        return None
+
     parsed = _version_tuple(version)
 
     if parsed and parsed[0] >= 25 and parsed[0] < 100:
@@ -220,9 +242,13 @@ def _max_java_major(version: str, loader: str | None = None) -> int | None:
     if parsed and parsed <= (1, 12, 2):
         return 8
 
-    # Pre-1.17 jars commonly break on Java 17+.
-    if parsed and parsed < (1, 17):
+    # 1.13–1.17 commonly break above Java 16.
+    if parsed and parsed < (1, 18):
         return 16
+
+    # 1.18–1.20.4 are safest on Java 17–21 (avoid a lone Java 25 install).
+    if parsed and parsed < (1, 20, 5):
+        return 21
     return None
 
 
@@ -504,11 +530,20 @@ def _find_forge_unix_args(server_dir: Path, instance: servers.ServerInstance) ->
 
 def _forge_jars(server_dir: Path) -> list[Path]:
     jars: list[Path] = []
-    for path in sorted(server_dir.glob("forge-*.jar")):
-        name = path.name.lower()
-        if "installer" in name:
-            continue
-        jars.append(path)
+    seen: set[Path] = set()
+    for pattern in ("forge-*.jar", "neoforge-*.jar"):
+        for path in sorted(server_dir.glob(pattern)):
+            name = path.name.lower()
+            if "installer" in name:
+                continue
+            try:
+                resolved = path.resolve()
+            except OSError:
+                resolved = path
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            jars.append(path)
     return jars
 
 
@@ -520,18 +555,20 @@ def _find_legacy_forge_jar(
     if not jars:
         return None
 
-    # Prefer an exact forge-<mc>-<build>.jar when we know the versions.
+    # Prefer an exact forge/neoforge-<mc>-<build>.jar when we know the versions.
     version = (instance.version or "").strip()
     build = (instance.loader_version or "").strip()
+    loader = (instance.loader or "").strip().lower()
+    prefixes = ("neoforge", "forge") if loader == "neoforge" else ("forge", "neoforge")
     if version and build:
-        exact = server_dir / f"forge-{version}-{build}.jar"
-        if exact.is_file():
-            return exact
-        # Promo values sometimes already include the MC version prefix.
-        if build.startswith(f"{version}-"):
-            exact = server_dir / f"forge-{build}.jar"
+        for prefix in prefixes:
+            exact = server_dir / f"{prefix}-{version}-{build}.jar"
             if exact.is_file():
                 return exact
+            if build.startswith(f"{version}-"):
+                exact = server_dir / f"{prefix}-{build}.jar"
+                if exact.is_file():
+                    return exact
 
     # Prefer non-universal / non-shim names last; main server jar first.
     def rank(path: Path) -> tuple[int, str]:
@@ -563,6 +600,14 @@ def _write_launch_record(server_dir: Path, command: list[str], java: str) -> Non
         pass
 
 
+def _detect_mod_loader_kind(server_dir: Path) -> str:
+    if (server_dir / "libraries" / "net" / "neoforged").is_dir() or any(
+        server_dir.glob("neoforge-*.jar")
+    ):
+        return "neoforge"
+    return "forge"
+
+
 def _forge_command(
     server_dir: Path,
     instance: servers.ServerInstance,
@@ -580,17 +625,19 @@ def _forge_command(
         or (server_dir / ".minebox-forge-jar").is_file()
         or legacy_jar is not None
         or any(server_dir.glob("forge-*-shim.jar"))
+        or any(server_dir.glob("neoforge-*-shim.jar"))
         or (server_dir / "libraries" / "net" / "minecraftforge").is_dir()
+        or (server_dir / "libraries" / "net" / "neoforged").is_dir()
     )
     if not looks_like_forge:
         return None
 
-    # Keep registry honest so the dashboard shows Forge, not Vanilla.
+    # Keep registry honest so the dashboard shows Forge/NeoForge, not Vanilla.
     if loader not in {"forge", "neoforge"}:
         try:
             servers.update_server_launch(
                 instance.server_id,
-                loader="forge",
+                loader=_detect_mod_loader_kind(server_dir),
                 main_jar=(
                     f"@{unix_args.relative_to(server_dir).as_posix()}"
                     if unix_args is not None
@@ -658,8 +705,8 @@ def _forge_command(
             return ["/bin/bash", str(safe)]
 
     raise RuntimeError(
-        "This Forge install is missing its Forge server jar / unix_args.txt. "
-        "Reinstall Forge from setup, or verify forge-*.jar exists in the server folder."
+        "This Forge/NeoForge install is missing its server jar / unix_args.txt. "
+        "Reinstall from setup, or verify forge-*.jar / neoforge-*.jar exists."
     )
 
 
@@ -667,6 +714,8 @@ def _resolve_main_jar(server_dir: Path, instance: servers.ServerInstance) -> str
     legacy_jar = _find_legacy_forge_jar(server_dir, instance)
     forge_installed = legacy_jar is not None or (
         server_dir / "libraries" / "net" / "minecraftforge"
+    ).is_dir() or (
+        server_dir / "libraries" / "net" / "neoforged"
     ).is_dir()
 
     configured = (instance.main_jar or "server.jar").strip()
@@ -683,6 +732,8 @@ def _resolve_main_jar(server_dir: Path, instance: servers.ServerInstance) -> str
 
     for name in (
         "fabric-server-launch.jar",
+        "paper.jar",
+        "purpur.jar",
         "server.jar",
     ):
         if (server_dir / name).is_file():

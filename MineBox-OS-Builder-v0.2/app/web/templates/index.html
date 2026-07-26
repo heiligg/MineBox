@@ -3367,10 +3367,12 @@
 
             const normalized = String(line).toLowerCase();
 
-            // Vanilla / Paper / older Forge
+            // Vanilla / Paper / older Forge / Bukkit
             if (
                 normalized.includes("rcon connection from") ||
-                normalized.includes("rcon running on")
+                normalized.includes("rcon running on") ||
+                normalized.includes("starting remote control listener") ||
+                normalized.includes("remote control listener")
             ) {
                 return true;
             }

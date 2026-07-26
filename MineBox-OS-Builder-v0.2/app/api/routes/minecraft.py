@@ -87,6 +87,8 @@ def launch_debug() -> dict[str, Any]:
             "minebox-stderr.log",
             "minebox-launcher.log",
             "latest.log",
+            "fml-server-latest.log",
+            "debug.log",
         ):
             path = server_dir / "logs" / name
             if not path.is_file():

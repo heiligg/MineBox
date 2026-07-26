@@ -220,6 +220,11 @@ def latest_lines(line_count: int = 100) -> dict:
                 or "Done (" in line
                 or "Forged mod loading" in line
                 or "MinecraftForge" in line
+                or "FabricLoader" in line
+                or "Loading Minecraft" in line
+                or "Paper" in line
+                or "NeoForge" in line
+                or "neoforged" in line.lower()
                 for line in journal_lines[-40:]
             ):
                 use_journal = True

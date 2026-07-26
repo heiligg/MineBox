@@ -285,8 +285,9 @@ def ensure(min_major: int, max_major: int | None = None) -> str:
 
     if max_major is not None and min_major <= 8:
         target_major = 8
-    elif max_major is not None and max_major <= 16:
-        target_major = 11
+    elif max_major is not None:
+        # Install the required floor (e.g. Java 16 for 1.17), clamped to max.
+        target_major = min(min_major, max_major)
     else:
         target_major = min_major
 

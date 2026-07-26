@@ -26,10 +26,30 @@ def human_size(value: int) -> str:
     return f"{size:.1f} TB"
 
 
+def _active_server_dir() -> Path | None:
+    try:
+        from services import servers
+
+        active = servers.active_server()
+    except Exception:
+        return None
+    if active is None:
+        return None
+    return Path(active.directory)
+
+
+def _inventory_root() -> Path:
+    active_dir = _active_server_dir()
+    if active_dir is not None and active_dir.is_dir():
+        return active_dir
+    return MINECRAFT_DIR
+
+
 def world_folders() -> list[tuple[str, str]]:
     result = []
+    root = _inventory_root()
     try:
-        for path in sorted(MINECRAFT_DIR.iterdir()):
+        for path in sorted(root.iterdir()):
             if path.is_dir() and (path / "level.dat").exists():
                 result.append((path.name, human_size(directory_size(path))))
     except OSError:
@@ -39,21 +59,40 @@ def world_folders() -> list[tuple[str, str]]:
 
 def software_inventory() -> dict[str, list[str]]:
     output: dict[str, list[str]] = {"plugins": [], "mods": [], "jars": []}
-    for key, folder in (("plugins", MINECRAFT_DIR / "plugins"), ("mods", MINECRAFT_DIR / "mods")):
+    root = _inventory_root()
+    for key, folder in (("plugins", root / "plugins"), ("mods", root / "mods")):
         try: output[key] = sorted(p.name for p in folder.glob("*.jar"))
         except OSError: pass
     try:
-        output["jars"] = sorted(p.name for p in MINECRAFT_DIR.glob("*.jar"))
+        output["jars"] = sorted(p.name for p in root.glob("*.jar"))
     except OSError:
         pass
     return output
 
 
 def crash_reports() -> list[Path]:
+    dirs: list[Path] = []
+    active_dir = _active_server_dir()
+    if active_dir is not None:
+        dirs.append(active_dir / "crash-reports")
+    dirs.append(CRASH_REPORT_DIR)
+
+    reports: list[Path] = []
+    seen: set[Path] = set()
+    for folder in dirs:
+        try:
+            for path in folder.glob("*.txt"):
+                resolved = path.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                reports.append(path)
+        except OSError:
+            continue
     try:
-        return sorted(CRASH_REPORT_DIR.glob("*.txt"), key=lambda p: p.stat().st_mtime, reverse=True)
+        return sorted(reports, key=lambda p: p.stat().st_mtime, reverse=True)
     except OSError:
-        return []
+        return reports
 
 
 def latest_crash_summary() -> str:
@@ -78,17 +117,27 @@ def network_status() -> list[str]:
 
 
 def storage_status() -> list[str]:
-    disk = shutil.disk_usage(MINECRAFT_DIR if MINECRAFT_DIR.exists() else "/")
+    root = _inventory_root()
+    disk = shutil.disk_usage(root if root.exists() else "/")
     return [
-        f"Minecraft folder: {human_size(directory_size(MINECRAFT_DIR))}",
+        f"Minecraft folder: {human_size(directory_size(root))}",
         f"Disk free: {human_size(disk.free)}",
         f"Disk total: {human_size(disk.total)}",
     ]
 
 
 def log_has_recent_error() -> bool:
+    path = SERVER_LOG
     try:
-        tail = SERVER_LOG.read_text(encoding="utf-8", errors="ignore").splitlines()[-200:]
+        from services import logs as log_service
+
+        discovered = log_service.minecraft_log_path()
+        if discovered is not None:
+            path = discovered
+    except Exception:
+        pass
+    try:
+        tail = path.read_text(encoding="utf-8", errors="ignore").splitlines()[-200:]
         return any("[ERROR]" in line or "Exception" in line for line in tail)
     except OSError:
         return False

@@ -127,11 +127,18 @@ def _dev_start() -> CommandResult:
         start_script.is_file()
         or (server_dir / "server.jar").is_file()
         or (server_dir / "fabric-server-launch.jar").is_file()
+        or (server_dir / "paper.jar").is_file()
+        or (server_dir / "purpur.jar").is_file()
         or (server_dir / ".minebox-forge-args").is_file()
         or any(server_dir.glob("forge-*-shim.jar"))
+        or any(server_dir.glob("neoforge-*-shim.jar"))
         or any(
             path.is_file() and "installer" not in path.name
             for path in server_dir.glob("forge-*.jar")
+        )
+        or any(
+            path.is_file() and "installer" not in path.name
+            for path in server_dir.glob("neoforge-*.jar")
         )
     )
     if not has_launchable:
@@ -249,6 +256,8 @@ def _recent_failure_hint() -> str:
             "logs/minebox-stderr.log",
             "logs/minebox-launcher.log",
             "logs/latest.log",
+            "logs/fml-server-latest.log",
+            "logs/debug.log",
         ):
             path = server_dir / relative
             if not path.is_file():
@@ -399,7 +408,10 @@ def save_world() -> CommandResult:
             True,
             "Server is offline; no live world save was needed.",
         )
+    # Newer servers accept "save-all flush"; older classic may reject "flush".
     result = rcon.send("save-all flush")
+    if not result.ok:
+        result = rcon.send("save-all")
     if not result.ok:
         return CommandResult(
             False,
