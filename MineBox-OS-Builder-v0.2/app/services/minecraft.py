@@ -201,6 +201,7 @@ def _recent_failure_hint() -> str:
     server_dir = _active_server_dir()
     if server_dir is not None:
         for relative in (
+            "logs/minebox-stderr.log",
             "logs/minebox-launcher.log",
             "logs/latest.log",
         ):
@@ -211,13 +212,12 @@ def _recent_failure_hint() -> str:
                 lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
             except OSError:
                 continue
-            useful = [
-                line.strip()
-                for line in lines[-40:]
-                if line.strip()
-                and not line.strip().startswith("#")
-            ]
-            for line in reversed(useful):
+            useful = [line.strip() for line in lines if line.strip()]
+            if not useful:
+                continue
+            # Prefer the last meaningful error-looking line; else last line.
+            chosen = useful[-1]
+            for line in reversed(useful[-80:]):
                 lower = line.lower()
                 if any(
                     token in lower
@@ -230,10 +230,16 @@ def _recent_failure_hint() -> str:
                         "unable to access jarfile",
                         "minebox launcher",
                         "failed",
+                        "needs java",
+                        "invalid or corrupt",
                     )
                 ):
-                    hints.append(line[:240])
+                    chosen = line
                     break
+            # Skip useless systemd summary lines if we have better detail.
+            if "failed with result" in chosen.lower() and len(useful) > 1:
+                continue
+            hints.append(chosen[:300])
 
     journal = run(
         [
@@ -241,7 +247,7 @@ def _recent_failure_hint() -> str:
             "-u",
             SERVICE_NAME,
             "-n",
-            "40",
+            "80",
             "--no-pager",
             "-o",
             "cat",
@@ -250,7 +256,12 @@ def _recent_failure_hint() -> str:
     )
     if journal.ok and journal.stdout:
         for line in reversed(journal.stdout.splitlines()):
-            lower = line.lower()
+            stripped = line.strip()
+            if not stripped:
+                continue
+            lower = stripped.lower()
+            if "failed with result" in lower:
+                continue
             if any(
                 token in lower
                 for token in (
@@ -258,16 +269,21 @@ def _recent_failure_hint() -> str:
                     "exception",
                     "unsupportedclassversion",
                     "outofmemory",
-                    "failed",
+                    "unable to access",
                     "minebox launcher",
+                    "needs java",
+                    "could not find",
+                    "invalid or corrupt",
                 )
             ):
-                hints.append(line.strip()[:240])
+                hints.append(stripped[:300])
                 break
 
     if not hints:
-        return ""
-    # Deduplicate while preserving order.
+        return (
+            " Check the server console logs, or on the Pi run: "
+            "journalctl -u minecraft.service -n 50 --no-pager"
+        )
     unique: list[str] = []
     for item in hints:
         if item not in unique:

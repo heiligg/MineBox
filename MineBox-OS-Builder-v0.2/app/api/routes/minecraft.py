@@ -1,4 +1,5 @@
 from typing import Any, Callable
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 
@@ -61,17 +62,42 @@ def restart():
 
 # MineBox Server Settings Routes v1
 
-@router.get("/settings")
-def server_settings():
-    result = minecraft.read_server_settings()
+@router.get("/launch-debug")
+def launch_debug() -> dict[str, Any]:
+    """Return the resolved launch command and recent crash logs for support."""
+    from services import servers
+    from services.launcher import build_command
 
-    if not result.get("ok"):
-        raise HTTPException(
-            status_code=500,
-            detail=result,
-        )
+    active = servers.active_server()
+    payload: dict[str, Any] = {
+        "ok": True,
+        "active_server": active.__dict__ if active else None,
+    }
+    try:
+        server_dir, command, _env = build_command()
+        payload["server_dir"] = str(server_dir)
+        payload["command"] = command
+    except Exception as error:
+        payload["ok"] = False
+        payload["build_error"] = str(error)
 
-    return result
+    if active is not None:
+        server_dir = Path(active.directory)
+        for name in (
+            "minebox-stderr.log",
+            "minebox-launcher.log",
+            "latest.log",
+        ):
+            path = server_dir / "logs" / name
+            if not path.is_file():
+                continue
+            try:
+                lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+            except OSError:
+                continue
+            payload[name] = lines[-80:]
+
+    return payload
 
 
 @router.put("/settings")
