@@ -10,12 +10,17 @@
     let urlInput;
     let resultsBox;
     let installedBox;
+    let providerSelect;
+    let cfKeyInput;
+    let provider = "modrinth";
     let busy = false;
     let context = {
         target_folder: "mods",
         loader: "vanilla",
         version: "",
         supports_modrinth: false,
+        supports_curseforge: false,
+        curseforge_configured: false,
     };
 
     function injectStyles() {
@@ -203,8 +208,18 @@
             loader: payload.loader || "vanilla",
             version: payload.version || "",
             supports_modrinth: Boolean(payload.supports_modrinth),
+            supports_curseforge: Boolean(payload.supports_curseforge),
+            curseforge_configured: Boolean(payload.curseforge_configured),
         };
         note.textContent = `${context.loader} ${context.version} → ${context.target_folder}/`;
+        if (providerSelect) {
+            providerSelect.value = provider;
+        }
+        if (cfKeyInput) {
+            cfKeyInput.placeholder = context.curseforge_configured
+                ? "CurseForge API key saved (paste to replace)"
+                : "Paste CurseForge API key (console.curseforge.com)";
+        }
         renderInstalled(payload.installed || []);
     }
 
@@ -235,7 +250,9 @@
         if (!items.length) {
             const empty = document.createElement("div");
             empty.className = "mods-empty";
-            empty.textContent = "No Modrinth results.";
+            empty.textContent = provider === "curseforge"
+                ? "No CurseForge results."
+                : "No Modrinth results.";
             resultsBox.appendChild(empty);
             return;
         }
@@ -257,7 +274,10 @@
             button.type = "button";
             button.className = "mods-button primary";
             button.textContent = `Install to ${context.target_folder}/`;
-            button.addEventListener("click", () => installProject(item.project_id || item.slug));
+            button.addEventListener("click", () => installProject(
+                item.project_id || item.slug,
+                item.provider || provider
+            ));
             card.append(title, desc, meta, button);
             resultsBox.appendChild(card);
         }
@@ -266,9 +286,14 @@
     async function loadContext() {
         const payload = await api(API_BASE);
         applyContext(payload);
-        if (!payload.supports_modrinth) {
+        if (!payload.supports_modrinth && !payload.supports_curseforge) {
             showMessage(
-                "This server type has limited Modrinth filtering. You can still paste a direct jar URL.",
+                "This server type has limited catalog filtering. You can still paste a direct jar URL.",
+                "warning"
+            );
+        } else if (provider === "curseforge" && !payload.curseforge_configured) {
+            showMessage(
+                "Add a free CurseForge API key below to search. URL paste works without a key.",
                 "warning"
             );
         }
@@ -283,15 +308,23 @@
             showMessage("Enter a search term.", "warning");
             return;
         }
+        if (provider === "curseforge" && !context.curseforge_configured) {
+            showMessage(
+                "Save a CurseForge API key first (console.curseforge.com → API keys).",
+                "warning"
+            );
+            return;
+        }
         busy = true;
-        showMessage("Searching Modrinth…");
+        const label = provider === "curseforge" ? "CurseForge" : "Modrinth";
+        showMessage(`Searching ${label}…`);
         try {
             const payload = await api(
-                `${API_BASE}/search?q=${encodeURIComponent(q)}&limit=20`
+                `${API_BASE}/search?q=${encodeURIComponent(q)}&limit=20&provider=${encodeURIComponent(provider)}`
             );
             applyContext(payload);
             renderResults(payload.results || []);
-            showMessage(`Found ${payload.total || 0} results.`, "success");
+            showMessage(`Found ${payload.total || 0} results on ${label}.`, "success");
         } catch (error) {
             showMessage(error.message || "Search failed.", "error");
         } finally {
@@ -299,16 +332,20 @@
         }
     }
 
-    async function installProject(projectId) {
+    async function installProject(projectId, projectProvider) {
         if (busy || !projectId) {
             return;
         }
+        const source = projectProvider || provider;
         busy = true;
-        showMessage("Downloading from Modrinth…");
+        showMessage(`Downloading from ${source === "curseforge" ? "CurseForge" : "Modrinth"}…`);
         try {
             const payload = await api(`${API_BASE}/install`, {
                 method: "POST",
-                body: JSON.stringify({ project_id: projectId }),
+                body: JSON.stringify({
+                    project_id: projectId,
+                    provider: source,
+                }),
             });
             applyContext(payload);
             const name = payload.installed && payload.installed.name;
@@ -318,6 +355,30 @@
             );
         } catch (error) {
             showMessage(error.message || "Install failed.", "error");
+        } finally {
+            busy = false;
+        }
+    }
+
+    async function saveCurseForgeKey() {
+        if (busy) {
+            return;
+        }
+        busy = true;
+        showMessage("Saving CurseForge API key…");
+        try {
+            const payload = await api(`${API_BASE}/curseforge-key`, {
+                method: "PUT",
+                body: JSON.stringify({ api_key: (cfKeyInput && cfKeyInput.value) || "" }),
+            });
+            if (cfKeyInput) {
+                cfKeyInput.value = "";
+            }
+            context.curseforge_configured = Boolean(payload.configured);
+            showMessage(payload.message || "Saved.", "success");
+            await loadContext();
+        } catch (error) {
+            showMessage(error.message || "Could not save API key.", "error");
         } finally {
             busy = false;
         }
@@ -384,6 +445,25 @@
 
         const searchBar = document.createElement("div");
         searchBar.className = "mods-toolbar";
+        providerSelect = document.createElement("select");
+        providerSelect.className = "mods-button";
+        providerSelect.innerHTML = `
+            <option value="modrinth">Modrinth</option>
+            <option value="curseforge">CurseForge</option>
+        `;
+        providerSelect.value = provider;
+        providerSelect.addEventListener("change", () => {
+            provider = providerSelect.value || "modrinth";
+            searchInput.placeholder = provider === "curseforge"
+                ? "Search CurseForge…"
+                : "Search Modrinth…";
+            if (provider === "curseforge" && !context.curseforge_configured) {
+                showMessage(
+                    "Add a free CurseForge API key below to search.",
+                    "warning"
+                );
+            }
+        });
         searchInput = document.createElement("input");
         searchInput.type = "search";
         searchInput.placeholder = "Search Modrinth…";
@@ -397,7 +477,20 @@
                 runSearch();
             }
         });
-        searchBar.append(searchInput, searchBtn);
+        searchBar.append(providerSelect, searchInput, searchBtn);
+
+        const cfBar = document.createElement("div");
+        cfBar.className = "mods-toolbar";
+        cfKeyInput = document.createElement("input");
+        cfKeyInput.type = "password";
+        cfKeyInput.autocomplete = "off";
+        cfKeyInput.placeholder = "Paste CurseForge API key (console.curseforge.com)";
+        const cfBtn = document.createElement("button");
+        cfBtn.type = "button";
+        cfBtn.className = "mods-button";
+        cfBtn.textContent = "Save CF key";
+        cfBtn.addEventListener("click", saveCurseForgeKey);
+        cfBar.append(cfKeyInput, cfBtn);
 
         const urlBar = document.createElement("div");
         urlBar.className = "mods-toolbar";
@@ -431,7 +524,7 @@
         message = document.createElement("div");
         message.className = "mods-message";
 
-        panel.append(header, searchBar, urlBar, grid, message);
+        panel.append(header, searchBar, cfBar, urlBar, grid, message);
         target.parentNode.insertBefore(panel, target.nextSibling);
         return true;
     }

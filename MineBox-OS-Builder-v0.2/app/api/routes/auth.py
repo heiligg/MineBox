@@ -655,3 +655,51 @@ def dismiss_security_reminder(request: Request):
         )
     auth.dismiss_security_reminder()
     return {"ok": True, **auth.security_reminder_status()}
+
+
+@router.get("/api/v1/security/tls")
+def tls_status(request: Request):
+    if request.session.get("authenticated") is not True:
+        return JSONResponse(
+            {"ok": False, "detail": "Authentication required."},
+            status_code=401,
+        )
+    from services import tls
+
+    return {"ok": True, **tls.status()}
+
+
+@router.post("/api/v1/security/tls/enable")
+def tls_enable(request: Request):
+    if request.session.get("authenticated") is not True:
+        return JSONResponse(
+            {"ok": False, "detail": "Authentication required."},
+            status_code=401,
+        )
+    from services import tls
+
+    try:
+        return tls.enable()
+    except tls.TlsError as error:
+        return JSONResponse(
+            {"ok": False, "detail": str(error)},
+            status_code=500,
+        )
+
+
+@router.post("/api/v1/security/tls/disable")
+def tls_disable(request: Request):
+    if request.session.get("authenticated") is not True:
+        return JSONResponse(
+            {"ok": False, "detail": "Authentication required."},
+            status_code=401,
+        )
+    from services import tls
+
+    try:
+        return tls.disable()
+    except tls.TlsError as error:
+        return JSONResponse(
+            {"ok": False, "detail": str(error)},
+            status_code=500,
+        )

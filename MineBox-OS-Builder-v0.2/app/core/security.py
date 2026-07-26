@@ -30,6 +30,14 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
     ) -> Response:
         path = request.url.path
 
+        setup_incomplete = False
+        try:
+            from api.routes.dashboard import minebox_is_configured
+
+            setup_incomplete = not minebox_is_configured()
+        except Exception:
+            setup_incomplete = False
+
         is_public = (
             path in PUBLIC_PATHS
             or path.startswith("/static/")
@@ -38,6 +46,8 @@ class AuthenticationMiddleware(BaseHTTPMiddleware):
             or path.startswith("/api/v1/setup")
             or path == "/openapi.json"
             or path == "/api/v1/openapi.json"
+            # First-boot Wi-Fi step needs network APIs before a session exists.
+            or (setup_incomplete and path.startswith("/api/v1/network"))
         )
 
         if is_public:

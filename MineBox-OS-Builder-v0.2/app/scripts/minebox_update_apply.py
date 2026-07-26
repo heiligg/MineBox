@@ -368,6 +368,22 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
             timeout=900,
         )
 
+    tls_script = target / "scripts" / "minebox_ensure_tls.py"
+    if tls_script.is_file():
+        run(["chmod", "0755", str(tls_script)])
+        run(
+            [
+                "install",
+                "-m",
+                "0755",
+                str(tls_script),
+                "/usr/local/sbin/minebox-ensure-tls",
+            ]
+        )
+    api_run = target / "scripts" / "minebox_api_run.py"
+    if api_run.is_file():
+        run(["chmod", "0755", str(api_run)])
+
     fan_script = target / "scripts" / "minebox_fan_test.py"
     if fan_script.is_file():
         try:
@@ -462,6 +478,11 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
         "/usr/local/sbin/minebox-install-avahi, "
         "/usr/bin/python3 /opt/minebox/scripts/minebox_ensure_java.py, "
         "/usr/local/sbin/minebox-ensure-java, "
+        "/usr/bin/python3 /opt/minebox/scripts/minebox_ensure_tls.py, "
+        "/usr/bin/python3 /opt/minebox/scripts/minebox_ensure_tls.py *, "
+        "/usr/local/sbin/minebox-ensure-tls, "
+        "/usr/local/sbin/minebox-ensure-tls *, "
+        "/usr/bin/systemctl restart minebox-api.service, "
         "/usr/bin/python3 /opt/minebox/scripts/minebox_fan_test.py *, "
         "/usr/bin/python3 /usr/local/sbin/minebox-fan-test *, "
         "/usr/local/sbin/minebox-fan-test *, "

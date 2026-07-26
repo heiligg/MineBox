@@ -91,6 +91,13 @@
                 <input type="password" id="security-confirm" placeholder="Confirm new password" autocomplete="new-password" minlength="12" />
                 <button type="button" id="security-change-save">Save new password</button>
                 <div class="security-note" id="security-change-note"></div>
+                <hr style="border:0;border-top:1px solid rgba(255,255,255,0.1);margin:14px 0;" />
+                <div class="security-note" id="security-tls-status">Checking HTTPS…</div>
+                <div class="security-reminder-actions">
+                    <button type="button" id="security-tls-enable">Enable HTTPS</button>
+                    <button type="button" id="security-tls-disable">Use HTTP</button>
+                </div>
+                <div class="security-note" id="security-tls-note"></div>
             </div>
         `;
         anchor.parentNode.insertBefore(banner, anchor);
@@ -195,7 +202,79 @@
             });
         }
 
+        async function refreshTls() {
+            const status = document.getElementById("security-tls-status");
+            if (!status) {
+                return;
+            }
+            try {
+                const response = await fetch("/api/v1/security/tls", {
+                    credentials: "same-origin",
+                    headers: { Accept: "application/json" },
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    status.textContent = "HTTPS status unavailable.";
+                    return;
+                }
+                status.textContent = payload.message
+                    || (payload.enabled
+                        ? "HTTPS is enabled (self-signed certificate)."
+                        : "Dashboard is using HTTP.");
+            } catch (_error) {
+                status.textContent = "HTTPS status unavailable.";
+            }
+        }
+
+        async function setTls(enable) {
+            const tlsNote = document.getElementById("security-tls-note");
+            if (tlsNote) {
+                tlsNote.textContent = enable
+                    ? "Enabling HTTPS and restarting the API…"
+                    : "Switching back to HTTP…";
+            }
+            try {
+                const response = await fetch(
+                    enable
+                        ? "/api/v1/security/tls/enable"
+                        : "/api/v1/security/tls/disable",
+                    {
+                        method: "POST",
+                        credentials: "same-origin",
+                        headers: { Accept: "application/json" },
+                    }
+                );
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(payload.detail || "TLS update failed.");
+                }
+                if (tlsNote) {
+                    tlsNote.textContent = enable
+                        ? "HTTPS enabled. Reload using https:// and trust the self-signed warning."
+                        : "HTTP restored. Reload the dashboard.";
+                }
+                window.setTimeout(() => {
+                    const scheme = enable ? "https" : "http";
+                    window.location.href = `${scheme}://${window.location.host}/`;
+                }, 1500);
+            } catch (error) {
+                if (tlsNote) {
+                    tlsNote.textContent = error.message || "TLS update failed.";
+                }
+            }
+        }
+
+        const tlsEnable = document.getElementById("security-tls-enable");
+        const tlsDisable = document.getElementById("security-tls-disable");
+        if (tlsEnable) {
+            tlsEnable.addEventListener("click", () => setTls(true));
+        }
+        if (tlsDisable) {
+            tlsDisable.addEventListener("click", () => setTls(false));
+        }
+
         loadReminder();
+        refreshTls();
     }
 
     if (document.readyState === "loading") {

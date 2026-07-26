@@ -49,6 +49,7 @@ SUPPORTED_LOADERS = (
     "paper",
     "fabric",
     "forge",
+    "neoforge",
 )
 
 

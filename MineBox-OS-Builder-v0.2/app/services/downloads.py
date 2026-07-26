@@ -28,6 +28,12 @@ FORGE_PROMOS_URL = (
 FORGE_MAVEN_METADATA = (
     "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml"
 )
+NEOFORGE_VERSIONS_API = (
+    "https://maven.neoforged.net/api/maven/versions/releases/net/neoforged/neoforge"
+)
+NEOFORGE_MAVEN_BASE = (
+    "https://maven.neoforged.net/releases/net/neoforged/neoforge"
+)
 
 USER_AGENT = "MineBox/0.2 (+https://github.com/heiligg/MineBox)"
 
@@ -123,6 +129,8 @@ def available_versions_for_loader(
         return _fabric_versions()
     if clean == "forge":
         return _forge_versions()
+    if clean == "neoforge":
+        return _neoforge_versions()
     raise DownloadError(f"Unsupported loader '{loader}'.")
 
 
@@ -246,6 +254,70 @@ def _forge_versions() -> list[dict[str, str]]:
     return versions
 
 
+def _neoforge_to_mc(nf_version: str) -> str | None:
+    """Map a NeoForge artifact version to a Minecraft version id."""
+    text = (nf_version or "").strip()
+    if not text or text.startswith("0."):
+        return None
+    base = text.split("+", 1)[0]
+    # Drop -beta / -alpha suffixes for the numeric core.
+    core = base.split("-", 1)[0]
+    parts = [piece for piece in core.split(".") if piece.isdigit()]
+    if not parts:
+        return None
+    major = int(parts[0])
+    # Calendar Minecraft (26.x): NeoForge 26.2.0.35-beta → MC 26.2
+    if major >= 25:
+        if len(parts) >= 2:
+            return f"{parts[0]}.{parts[1]}"
+        return parts[0]
+    # Classic: NeoForge 21.1.x → MC 1.21.1
+    if len(parts) >= 2:
+        return f"1.{parts[0]}.{parts[1]}"
+    return f"1.{parts[0]}"
+
+
+def _neoforge_versions() -> list[dict[str, str]]:
+    payload = _load_json(NEOFORGE_VERSIONS_API)
+    raw_versions = payload.get("versions") if isinstance(payload, dict) else []
+    if not isinstance(raw_versions, list):
+        raise DownloadError("NeoForge version list was incomplete.")
+
+    # Prefer stable builds per Minecraft version; fall back to newest prerelease.
+    best_stable: dict[str, str] = {}
+    best_any: dict[str, str] = {}
+    for entry in raw_versions:
+        nf = str(entry or "").strip()
+        if not nf:
+            continue
+        mc = _neoforge_to_mc(nf)
+        if not mc:
+            continue
+        lower = nf.lower()
+        is_prerelease = any(
+            token in lower for token in ("alpha", "beta", "snapshot", "pre")
+        )
+        best_any[mc] = nf  # list is chronological; last write wins as newest
+        if not is_prerelease:
+            best_stable[mc] = nf
+
+    versions: list[dict[str, str]] = []
+    for mc in best_any:
+        nf = best_stable.get(mc) or best_any[mc]
+        versions.append(
+            {
+                "id": mc,
+                "type": "release",
+                "release_time": "",
+                "loader": "neoforge",
+                "loader_version": nf,
+                "label": f"{mc} (NeoForge {nf})",
+            }
+        )
+    versions.sort(key=lambda item: _version_key(item["id"]), reverse=True)
+    return versions
+
+
 def _version_key(version: str) -> tuple[int, ...]:
     parts: list[int] = []
     for piece in version.split("."):
@@ -285,6 +357,13 @@ def download_server(
         )
     if clean == "forge":
         return _install_forge(
+            version_id,
+            server_dir,
+            overwrite=overwrite,
+            loader_version=loader_version,
+        )
+    if clean == "neoforge":
+        return _install_neoforge(
             version_id,
             server_dir,
             overwrite=overwrite,
@@ -607,6 +686,130 @@ def _install_forge(
         "loader": "forge",
         "version": version_id,
         "loader_version": forge_build,
+        "main_jar": main_jar,
+        "file": str(
+            server_dir
+            / (
+                unix_args[0]
+                if main_jar.startswith("@")
+                else main_jar
+            )
+        ),
+        "size_bytes": 0,
+        "sha1": "",
+    }
+
+
+def _resolve_neoforge_build(version_id: str, loader_version: str) -> str:
+    requested = (loader_version or "").strip()
+    if requested:
+        return requested
+    for entry in _neoforge_versions():
+        if entry.get("id") == version_id and entry.get("loader_version"):
+            return str(entry["loader_version"])
+    raise DownloadError(f"No NeoForge build was found for Minecraft {version_id}.")
+
+
+def _install_neoforge(
+    version_id: str,
+    server_dir: Path,
+    *,
+    overwrite: bool,
+    loader_version: str,
+) -> dict[str, Any]:
+    nf_version = _resolve_neoforge_build(version_id, loader_version)
+    unix_args = list(
+        (server_dir / "libraries" / "net" / "neoforged" / "neoforge").glob(
+            f"{nf_version}/unix_args.txt"
+        )
+    )
+    plain = server_dir / f"neoforge-{nf_version}.jar"
+    if (plain.exists() or unix_args) and not overwrite:
+        raise DownloadError(
+            f"A NeoForge server already exists for '{server_dir.name}'."
+        )
+
+    installer_name = f"neoforge-{nf_version}-installer.jar"
+    installer_jar = server_dir / installer_name
+    installer_url = f"{NEOFORGE_MAVEN_BASE}/{nf_version}/{installer_name}"
+    _download_bytes(installer_url, installer_jar, timeout=600)
+
+    java = _java_for(version_id)
+    result = subprocess.run(
+        [java, "-jar", str(installer_jar), "--installServer"],
+        cwd=server_dir,
+        capture_output=True,
+        text=True,
+        timeout=900,
+        check=False,
+    )
+    installer_jar.unlink(missing_ok=True)
+
+    unix_args = list(
+        (server_dir / "libraries" / "net" / "neoforged" / "neoforge").glob(
+            f"{nf_version}/unix_args.txt"
+        )
+    )
+    if not unix_args:
+        unix_args = list(
+            (server_dir / "libraries" / "net" / "neoforged").rglob("unix_args.txt")
+        )
+    shim = server_dir / f"neoforge-{nf_version}-shim.jar"
+    plain = server_dir / f"neoforge-{nf_version}.jar"
+
+    main_jar = "server.jar"
+    if unix_args:
+        main_jar = f"@{unix_args[0].relative_to(server_dir).as_posix()}"
+        (server_dir / ".minebox-forge-args").write_text(
+            str(unix_args[0].relative_to(server_dir)).replace("\\", "/") + "\n",
+            encoding="utf-8",
+        )
+    elif shim.is_file():
+        main_jar = shim.name
+        (server_dir / ".minebox-forge-jar").write_text(shim.name + "\n", encoding="utf-8")
+    elif plain.is_file():
+        main_jar = plain.name
+        (server_dir / ".minebox-forge-jar").write_text(plain.name + "\n", encoding="utf-8")
+    else:
+        candidates = [
+            path
+            for path in sorted(server_dir.glob("neoforge-*.jar"))
+            if "installer" not in path.name.lower()
+        ]
+        if candidates:
+            main_jar = candidates[0].name
+            (server_dir / ".minebox-forge-jar").write_text(
+                main_jar + "\n", encoding="utf-8"
+            )
+        elif result.returncode != 0:
+            detail = (
+                result.stderr or result.stdout or "NeoForge installer failed."
+            ).strip()
+            raise DownloadError(detail)
+        else:
+            raise DownloadError(
+                "NeoForge installed, but MineBox could not find a launchable jar."
+            )
+
+    run_sh = server_dir / "run.sh"
+    if run_sh.is_file():
+        try:
+            os.chmod(run_sh, 0o755)
+        except OSError:
+            pass
+
+    user_jvm = server_dir / "user_jvm_args.txt"
+    if not user_jvm.is_file():
+        user_jvm.write_text(
+            "# JVM arguments for NeoForge\n-Xms2G\n-Xmx2G\n",
+            encoding="utf-8",
+        )
+
+    return {
+        "success": True,
+        "loader": "neoforge",
+        "version": version_id,
+        "loader_version": nf_version,
         "main_jar": main_jar,
         "file": str(
             server_dir

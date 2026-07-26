@@ -687,6 +687,7 @@
                             <option value="paper">Paper</option>
                             <option value="fabric">Fabric</option>
                             <option value="forge">Forge</option>
+                            <option value="neoforge">NeoForge</option>
                         </select>
                     </div>
 
@@ -864,9 +865,13 @@
 
                     <p class="description" style="margin-inline: auto;">
                         MineBox finished configuring the Minecraft server.
-                        Next: see how friends join on your network, then
-                        start the server from the dashboard.
+                        Do these next:
                     </p>
+                    <ol style="text-align:left;max-width:420px;margin:16px auto;color:var(--muted);line-height:1.5;">
+                        <li>Open <strong>How to join</strong> for the LAN address and port.</li>
+                        <li>Start the server from the dashboard.</li>
+                        <li>Optional: add mods/plugins from the Mods panel.</li>
+                    </ol>
 
                     <div class="actions-right" style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:18px;">
                         <button
@@ -920,7 +925,9 @@
             fabric:
                 "Fabric is a lightweight mod loader. Add mods to the mods folder after install.",
             forge:
-                "Any Forge version. MineBox installs the matching Java automatically (Java 8 for old Forge, 17/21 for newer)."
+                "Forge supports a huge mod ecosystem. MineBox installs the matching Java automatically.",
+            neoforge:
+                "NeoForge is the modern Forge fork. Best for newer Minecraft versions and many current mods."
         };
 
         function selectedLoaderVersion() {
@@ -1076,6 +1083,10 @@
 
                 currentNetworkReady = networkIsReady(data.network);
                 updateNetworkStatus(data.network);
+
+                if (currentNetworkReady && networkNext) {
+                    networkNext.textContent = "Continue";
+                }
 
                 if (
                     currentNetworkReady &&
