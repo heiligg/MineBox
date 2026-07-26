@@ -23,8 +23,9 @@
         },
         {
             key: "gamemode",
-            label: "Default gamemode",
-            description: "The gamemode assigned to new players.",
+            label: "Gamemode",
+            description:
+                "Sets creative/survival for the world and players. Applied to everyone when you save.",
             type: "select",
             options: [
                 ["survival", "Survival"],
@@ -36,7 +37,8 @@
         {
             key: "difficulty",
             label: "Difficulty",
-            description: "Controls hostile mobs and survival difficulty.",
+            description:
+                "Controls hostile mobs and survival difficulty. Applied live when you save.",
             type: "select",
             options: [
                 ["peaceful", "Peaceful"],
@@ -110,7 +112,8 @@
         {
             key: "force-gamemode",
             label: "Force gamemode",
-            description: "Reset players to the default gamemode when they join.",
+            description:
+                "Reset every player to the server gamemode when they join. Kept on when you change gamemode from MineBox.",
             type: "checkbox"
         }
     ];

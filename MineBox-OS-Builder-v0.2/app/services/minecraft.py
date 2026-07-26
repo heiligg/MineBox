@@ -554,6 +554,12 @@ def save_server_settings(payload: dict[str, object]) -> dict[str, object]:
             value = value.lower()
         formatted[key] = value
 
+    # server.properties gamemode only affects new players unless force-gamemode
+    # is on. When the dashboard changes gamemode, force it so rejoining players
+    # actually get the selected mode.
+    if "gamemode" in formatted:
+        formatted["force-gamemode"] = "true"
+
     was_running = is_running()
     if was_running:
         # Stop first so Minecraft's shutdown flush cannot overwrite our edits.
@@ -614,10 +620,13 @@ def save_server_settings(payload: dict[str, object]) -> dict[str, object]:
     should_start = apply_changes or was_running
     started_ok = True
     start_message = ""
+    runtime_note = ""
     if should_start:
         started = start()
         started_ok = bool(started.ok)
         start_message = started.stdout or started.stderr or ""
+        if started_ok:
+            runtime_note = _apply_runtime_settings(formatted)
 
     current = read_server_settings()
     if not started_ok:
@@ -635,6 +644,8 @@ def save_server_settings(payload: dict[str, object]) -> dict[str, object]:
 
     if was_running or apply_changes:
         message = "Settings saved and Minecraft restarted so they take effect."
+        if runtime_note:
+            message = f"{message} {runtime_note}"
     else:
         message = "Settings saved to server.properties."
 
@@ -646,6 +657,50 @@ def save_server_settings(payload: dict[str, object]) -> dict[str, object]:
         "restart_required": False,
         "applied": bool(was_running or apply_changes),
     }
+
+
+def _wait_for_rcon(timeout: int = 120) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not is_running():
+            time.sleep(1.0)
+            continue
+        result = rcon.send("list", timeout=3.0)
+        if result.ok:
+            return True
+        time.sleep(2.0)
+    return False
+
+
+def _apply_runtime_settings(formatted: dict[str, str]) -> str:
+    """Push live world settings over RCON after a restart."""
+    if not formatted:
+        return ""
+    if not _wait_for_rcon():
+        return (
+            "The server is online, but live gamemode/difficulty could not be "
+            "applied yet — reconnect in a moment or toggle Force gamemode."
+        )
+
+    applied: list[str] = []
+    gamemode = formatted.get("gamemode")
+    if gamemode:
+        rcon.send(f"defaultgamemode {gamemode}")
+        rcon.send(f"gamemode {gamemode} @a")
+        applied.append(f"gamemode {gamemode}")
+
+    difficulty = formatted.get("difficulty")
+    if difficulty:
+        rcon.send(f"difficulty {difficulty}")
+        applied.append(f"difficulty {difficulty}")
+
+    if formatted.get("force-gamemode") == "true" and gamemode:
+        # Re-assert for anyone who joins during this apply window.
+        rcon.send(f"defaultgamemode {gamemode}")
+
+    if not applied:
+        return ""
+    return "Live world updated: " + ", ".join(applied) + "."
 
 
 def write_properties_updates(updates: dict[str, str]) -> CommandResult:
