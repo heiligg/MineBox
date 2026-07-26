@@ -383,6 +383,12 @@ def ensure_runtime_for_active() -> str:
         raise RuntimeError("No active Minecraft server is selected.")
     return _find_java(instance.version)
 
+
+def build_command() -> tuple[Path, list[str], dict[str, str] | None]:
+    instance = servers.active_server()
+    if instance is None:
+        raise RuntimeError("No active Minecraft server is selected.")
+
     server_dir = Path(instance.directory)
     if not server_dir.is_dir():
         raise RuntimeError(f"Server directory does not exist: {server_dir}")
