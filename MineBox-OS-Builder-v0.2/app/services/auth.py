@@ -5,16 +5,25 @@ import hmac
 import json
 import os
 import secrets
+import shutil
 from pathlib import Path
 from typing import Any
 
 
+DEFAULT_AUTH_FILE = Path("/var/lib/minebox/auth.json")
+LEGACY_AUTH_FILES = (
+    Path("/opt/minebox/config/auth.json"),
+    Path("/opt/minebox.previous/config/auth.json"),
+    Path("/opt/minebox/auth.json"),
+    Path("/opt/minebox.previous/auth.json"),
+)
+
 AUTH_FILE = Path(
     os.environ.get(
         "MINEBOX_AUTH_FILE",
-        "/opt/minebox/config/auth.json",
+        str(DEFAULT_AUTH_FILE),
     )
-)
+).expanduser()
 
 DEFAULT_USERNAME = "admin"
 
@@ -31,7 +40,35 @@ def _ensure_parent_directory() -> None:
         pass
 
 
+def _migrate_legacy_auth() -> None:
+    """
+    Keep admin credentials across OTA updates.
+
+    Older builds stored auth.json under /opt/minebox, which is replaced on
+    every update. Migrate once into /var/lib/minebox.
+    """
+
+    if AUTH_FILE.exists():
+        return
+
+    for legacy in LEGACY_AUTH_FILES:
+        if not legacy.is_file():
+            continue
+        try:
+            _ensure_parent_directory()
+            shutil.copy2(legacy, AUTH_FILE)
+            try:
+                AUTH_FILE.chmod(0o600)
+            except OSError:
+                pass
+            return
+        except OSError:
+            continue
+
+
 def _load() -> dict[str, Any]:
+    _migrate_legacy_auth()
+
     if not AUTH_FILE.exists():
         return {}
 
@@ -73,6 +110,16 @@ def _save(data: dict[str, Any]) -> None:
         AUTH_FILE.chmod(0o600)
     except OSError:
         pass
+
+    # Keep a compatibility copy for older tooling, but /var/lib is authoritative.
+    if AUTH_FILE.resolve() != Path("/opt/minebox/config/auth.json").resolve():
+        try:
+            legacy = Path("/opt/minebox/config/auth.json")
+            legacy.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(AUTH_FILE, legacy)
+            legacy.chmod(0o600)
+        except OSError:
+            pass
 
 
 def is_configured() -> bool:

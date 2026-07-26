@@ -388,6 +388,50 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
         )
 
 
+def preserve_persistent_state(previous: Path, target: Path, log_file: Path) -> None:
+    """Keep admin auth and similar state across /opt/minebox swaps."""
+    durable = Path("/var/lib/minebox")
+    durable.mkdir(parents=True, exist_ok=True)
+
+    candidates = [
+        previous / "config" / "auth.json",
+        previous / "auth.json",
+        Path("/opt/minebox.previous/config/auth.json"),
+        Path("/opt/minebox/config/auth.json"),
+    ]
+    durable_auth = durable / "auth.json"
+    if not durable_auth.is_file():
+        for source in candidates:
+            if not source.is_file():
+                continue
+            try:
+                shutil.copy2(source, durable_auth)
+                os.chmod(durable_auth, 0o600)
+                try:
+                    shutil.chown(durable_auth, user="minebox", group="minebox")
+                except OSError:
+                    pass
+                log(log_file, f"Preserved admin credentials from {source}.")
+                break
+            except OSError as exc:
+                log(log_file, f"Could not preserve auth from {source}: {exc}")
+
+    # Also restore a copy into the new app tree for compatibility.
+    if durable_auth.is_file():
+        try:
+            destination = target / "config" / "auth.json"
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(durable_auth, destination)
+            os.chmod(destination, 0o600)
+            try:
+                shutil.chown(destination, user="minebox", group="minebox")
+                shutil.chown(destination.parent, user="minebox", group="minebox")
+            except OSError:
+                pass
+        except OSError as exc:
+            log(log_file, f"Could not mirror auth into new app tree: {exc}")
+
+
 def restart_api(dev: bool) -> None:
     if dev:
         return
@@ -527,6 +571,11 @@ def apply_update(dev: bool) -> int:
         else:
             next_dir.replace(target)
             swapped = True
+
+        if previous.exists():
+            preserve_persistent_state(previous, target, log_file)
+        else:
+            preserve_persistent_state(target, target, log_file)
 
         requirements = target / "requirements.txt"
         if requirements.is_file() and not dev:

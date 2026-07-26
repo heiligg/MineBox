@@ -140,12 +140,33 @@
         return updater.state || "unknown";
     }
 
+    let reloadArmed = false;
+
     function renderStatus(data) {
         const updater = data.updater || {};
         const service = data.service || {};
         const state = determineState(data);
 
+        const wasUpdating = updateRunning;
         updateRunning = state === "updating";
+
+        if (
+            wasUpdating &&
+            !updateRunning &&
+            (state === "up_to_date" ||
+                state === "success" ||
+                updater.state === "success") &&
+            !reloadArmed
+        ) {
+            reloadArmed = true;
+            showMessage(
+                "Update complete. Reloading the dashboard…",
+                "success"
+            );
+            window.setTimeout(() => {
+                window.location.reload();
+            }, 1500);
+        }
 
         versionValue.textContent =
             displayValue(data.version);
