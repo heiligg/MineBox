@@ -43,28 +43,21 @@ def _java_candidates(version: str) -> list[str]:
     configured = os.environ.get("MINEBOX_JAVA")
     candidates: list[str] = [configured] if configured else []
     major = _required_java_major(version)
+    maximum = _max_java_major(version) or major
 
-    if major <= 8:
-        candidates.extend([
-            "/usr/lib/jvm/java-8-openjdk-arm64/bin/java",
-            "/usr/lib/jvm/java-8-openjdk-armhf/bin/java",
-            "/usr/lib/jvm/java-8-openjdk-amd64/bin/java",
-            "java8",
-        ])
-    elif major <= 17:
-        candidates.extend([
-            "/usr/lib/jvm/java-17-openjdk-arm64/bin/java",
-            "/usr/lib/jvm/java-17-openjdk-amd64/bin/java",
-            "/usr/lib/jvm/temurin-17-jdk-arm64/bin/java",
-            "java17",
-        ])
-    else:
-        candidates.extend([
-            "/usr/lib/jvm/java-21-openjdk-arm64/bin/java",
-            "/usr/lib/jvm/java-21-openjdk-amd64/bin/java",
-            "/usr/lib/jvm/temurin-21-jdk-arm64/bin/java",
-            "java21",
-        ])
+    for value in range(major, maximum + 1):
+        candidates.extend(
+            [
+                f"/opt/java/temurin-{value}/bin/java",
+                f"/opt/java/jdk-{value}/bin/java",
+                f"/usr/lib/jvm/java-{value}-openjdk-arm64/bin/java",
+                f"/usr/lib/jvm/java-{value}-openjdk-armhf/bin/java",
+                f"/usr/lib/jvm/java-{value}-openjdk-amd64/bin/java",
+                f"/usr/lib/jvm/temurin-{value}-jdk-arm64/bin/java",
+                f"/usr/lib/jvm/temurin-{value}-jre-arm64/bin/java",
+                f"java{value}",
+            ]
+        )
 
     candidates.append("java")
     return candidates
@@ -94,51 +87,110 @@ def _java_major_version(java: str) -> int | None:
     return int(ver.split(".")[0])
 
 
+def _ensure_java_installed(version: str) -> None:
+    """Install Java 8/16/17/21 as needed (Temurin fallback for missing apt pkgs)."""
+    required = _required_java_major(version)
+    maximum = _max_java_major(version)
+    script = Path(__file__).resolve().parents[1] / "scripts" / "minebox_ensure_java.py"
+    helpers = [
+        [
+            "sudo",
+            "-n",
+            "/usr/local/sbin/minebox-ensure-java",
+            "--min",
+            str(required),
+        ],
+        [
+            "sudo",
+            "-n",
+            "/usr/bin/python3",
+            str(script),
+            "--min",
+            str(required),
+        ],
+        [
+            "/usr/bin/python3",
+            str(script),
+            "--min",
+            str(required),
+        ],
+    ]
+    if maximum is not None:
+        for command in helpers:
+            command.extend(["--max", str(maximum)])
+
+    for command in helpers:
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=900,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode == 0 and (result.stdout or "").strip():
+            return
+        # Rootless no-op when already present.
+        if result.returncode == 0:
+            return
+
+
 def _find_java(version: str) -> str:
     required = _required_java_major(version)
     maximum = _max_java_major(version)
-    compatible: list[tuple[int, str]] = []
 
-    for candidate in _java_candidates(version):
-        if not candidate:
-            continue
-        if "/" in candidate:
-            path = Path(candidate)
-            if not (path.is_file() and os.access(path, os.X_OK)):
+    def _scan() -> str | None:
+        compatible: list[tuple[int, str]] = []
+        for candidate in _java_candidates(version):
+            if not candidate:
                 continue
-            resolved = str(path)
-        else:
-            found = shutil.which(candidate)
-            if not found:
+            if "/" in candidate:
+                path = Path(candidate)
+                if not (path.is_file() and os.access(path, os.X_OK)):
+                    continue
+                resolved = str(path)
+            else:
+                found = shutil.which(candidate)
+                if not found:
+                    continue
+                resolved = found
+
+            major = _java_major_version(resolved)
+            if major is None:
                 continue
-            resolved = found
-
-        major = _java_major_version(resolved)
-        if major is None:
-            continue
-        if major < required:
-            continue
-        if maximum is not None and major > maximum:
-            continue
-        compatible.append((major, resolved))
-
-    if compatible:
-        # Prefer the newest allowed runtime.
+            if major < required:
+                continue
+            if maximum is not None and major > maximum:
+                continue
+            compatible.append((major, resolved))
+        if not compatible:
+            return None
         compatible.sort(key=lambda item: item[0], reverse=True)
         return compatible[0][1]
+
+    found = _scan()
+    if found:
+        return found
+
+    _ensure_java_installed(version)
+    found = _scan()
+    if found:
+        return found
 
     if maximum is not None:
         raise RuntimeError(
             f"Minecraft {version} needs Java {required}"
             + (f"-{maximum}" if maximum != required else "")
-            + ". Newer Java breaks this Forge build "
-            "(ClassCastException / LaunchWrapper). "
-            f"Install openjdk-{required}-jre-headless, or create a Forge "
-            "1.18+ server instead."
+            + ". MineBox could not install it automatically. "
+            f"On the Pi run: sudo python3 /opt/minebox/scripts/minebox_ensure_java.py "
+            f"--min {required}"
+            + (f" --max {maximum}" if maximum is not None else "")
         )
     raise RuntimeError(
         f"No compatible Java runtime was found for Minecraft {version} "
-        f"(needs Java {required}+). Install openjdk-{required}-jre-headless."
+        f"(needs Java {required}+)."
     )
 
 
@@ -324,10 +376,12 @@ def _resolve_main_jar(server_dir: Path, instance: servers.ServerInstance) -> str
     )
 
 
-def build_command() -> tuple[Path, list[str], dict[str, str] | None]:
+def ensure_runtime_for_active() -> str:
+    """Make sure the active server's Java is installed; return its path."""
     instance = servers.active_server()
     if instance is None:
         raise RuntimeError("No active Minecraft server is selected.")
+    return _find_java(instance.version)
 
     server_dir = Path(instance.directory)
     if not server_dir.is_dir():

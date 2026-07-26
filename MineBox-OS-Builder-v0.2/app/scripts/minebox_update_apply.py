@@ -287,6 +287,25 @@ def install_systemd_units(target: Path, dev: bool) -> None:
                 f"/etc/systemd/system/{name}",
             ]
         )
+
+    # Keep minecraft.service TimeoutStartSec and launcher path current.
+    minecraft_unit_candidates = [
+        target.parent / "systemd" / "minecraft.service",
+        target / "services" / "minecraft.service",
+    ]
+    for source in minecraft_unit_candidates:
+        if source.is_file():
+            run(
+                [
+                    "install",
+                    "-m",
+                    "0644",
+                    str(source),
+                    "/etc/systemd/system/minecraft.service",
+                ]
+            )
+            break
+
     run(["systemctl", "daemon-reload"], timeout=60)
 
 
@@ -318,6 +337,19 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
                 "0755",
                 str(avahi_script),
                 "/usr/local/sbin/minebox-install-avahi",
+            ]
+        )
+
+    java_script = target / "scripts" / "minebox_ensure_java.py"
+    if java_script.is_file():
+        run(["chmod", "0755", str(java_script)])
+        run(
+            [
+                "install",
+                "-m",
+                "0755",
+                str(java_script),
+                "/usr/local/sbin/minebox-ensure-java",
             ]
         )
 
@@ -365,6 +397,8 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
         "/usr/local/sbin/minebox-fix-minecraft-perms, "
         "/usr/bin/python3 /opt/minebox/scripts/minebox_install_avahi.py, "
         "/usr/local/sbin/minebox-install-avahi, "
+        "/usr/bin/python3 /opt/minebox/scripts/minebox_ensure_java.py *, "
+        "/usr/local/sbin/minebox-ensure-java *, "
         "/usr/bin/systemctl poweroff, "
         "/usr/bin/systemctl reboot\n"
     )
@@ -376,6 +410,8 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
         "minebox_fix_minecraft_perms" not in current
         or "hostapd.service" not in current
         or "minebox_install_avahi" not in current
+        or "minebox_ensure_java" not in current
+        or "minebox-ensure-java" not in current
     ):
         sudoers.write_text(desired, encoding="utf-8")
         os.chmod(sudoers, 0o440)

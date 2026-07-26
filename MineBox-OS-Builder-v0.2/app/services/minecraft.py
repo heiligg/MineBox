@@ -294,6 +294,14 @@ def _recent_failure_hint() -> str:
 def start() -> CommandResult:
     if is_running():
         return CommandResult(True, "Minecraft is already running.")
+    # Install matching Java (8/17/21) before systemd start so long downloads
+    # are not killed by service start timeouts.
+    try:
+        from services.launcher import ensure_runtime_for_active
+
+        ensure_runtime_for_active()
+    except Exception as error:
+        return CommandResult(False, stderr=str(error))
     if _dev_mode():
         return _dev_start()
     result = _service("start")
