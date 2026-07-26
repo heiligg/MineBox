@@ -396,6 +396,11 @@
         }
         loadStatus(false);
         window.setInterval(() => loadStatus(false), 30000);
+        if (window.location.hash === "#join" && panel) {
+            window.setTimeout(() => {
+                panel.scrollIntoView({ behavior: "smooth", block: "start" });
+            }, 50);
+        }
     }
 
     if (document.readyState === "loading") {

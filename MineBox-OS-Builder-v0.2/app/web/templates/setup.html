@@ -864,16 +864,26 @@
 
                     <p class="description" style="margin-inline: auto;">
                         MineBox finished configuring the Minecraft server.
-                        You can now manage it from the dashboard.
+                        Next: see how friends join on your network, then
+                        start the server from the dashboard.
                     </p>
 
-                    <button
-                        type="button"
-                        class="button button-primary"
-                        id="open-dashboard"
-                    >
-                        Open Dashboard
-                    </button>
+                    <div class="actions-right" style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:18px;">
+                        <button
+                            type="button"
+                            class="button button-primary"
+                            id="open-how-to-join"
+                        >
+                            How to join
+                        </button>
+                        <button
+                            type="button"
+                            class="button button-secondary"
+                            id="open-dashboard"
+                        >
+                            Open Dashboard
+                        </button>
+                    </div>
                 </section>
             </div>
         </section>
@@ -1555,6 +1565,13 @@
         document.getElementById("create-server").addEventListener(
             "click",
             createServer
+        );
+
+        document.getElementById("open-how-to-join").addEventListener(
+            "click",
+            () => {
+                window.location.href = "/#join";
+            }
         );
 
         document.getElementById("open-dashboard").addEventListener(
