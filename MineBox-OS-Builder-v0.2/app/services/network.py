@@ -11,6 +11,8 @@ from services.system import CommandResult, run
 HOTSPOT_CONNECTION_NAME = "MineBox-Hotspot"
 DEFAULT_HOTSPOT_SSID = "MineBox-Setup"
 DEFAULT_HOTSPOT_ADDRESS = "192.168.4.1/24"
+# Dedicated hostapd AP always owns the onboard radio.
+HOTSPOT_INTERFACE = "wlan0"
 
 
 def _nmcli(arguments: list[str], timeout: int = 30) -> CommandResult:
@@ -148,6 +150,50 @@ def wifi_interface() -> str | None:
 
     physical = _physical_wifi_interfaces()
     return physical[0] if physical else None
+
+
+def client_wifi_interface() -> str | None:
+    """
+    Return a Wi-Fi interface suitable for client scan/join.
+
+    Prefer NetworkManager-managed adapters that are not the dedicated
+    setup-hotspot radio (wlan0). Falls back to any NM Wi-Fi device.
+    """
+
+    devices = _wifi_devices()
+    clients = [
+        device
+        for device in devices
+        if device["device"] != HOTSPOT_INTERFACE
+    ]
+
+    for device in clients:
+        if device["state"] in {"connected", "connecting"}:
+            return device["device"]
+
+    if clients:
+        return clients[0]["device"]
+
+    for device in devices:
+        if device["state"] in {"connected", "connecting"}:
+            return device["device"]
+
+    if devices:
+        return devices[0]["device"]
+
+    physical = [
+        name
+        for name in _physical_wifi_interfaces()
+        if name != HOTSPOT_INTERFACE
+    ]
+    if physical:
+        return physical[0]
+    return None
+
+
+def hotspot_radio_in_use() -> bool:
+    """True when the onboard AP radio is busy with the setup hotspot."""
+    return hotspot_is_active() or _hostapd_hotspot_active()
 
 
 def _physical_wifi_interfaces() -> list[str]:
@@ -455,10 +501,14 @@ def status() -> dict[str, Any]:
     wifi_gateway = None
     wifi_dns: list[str] = []
 
-    if available and wifi_iface is not None:
+    # Prefer a client radio (USB wlan1) for join/status while hotspot owns wlan0.
+    client_candidate = client_wifi_interface()
+    status_wifi_iface = client_candidate or wifi_iface
+
+    if available and status_wifi_iface is not None:
         devices = _wifi_devices()
         selected = next(
-            (device for device in devices if device["device"] == wifi_iface),
+            (device for device in devices if device["device"] == status_wifi_iface),
             None,
         )
         if selected is not None:
@@ -468,15 +518,15 @@ def status() -> dict[str, Any]:
                 if selected["connection"] not in {"", "--"}
                 else None
             )
-        active_wifi = _active_wifi_details(wifi_iface)
+        active_wifi = _active_wifi_details(status_wifi_iface)
         if active_wifi is not None:
             wifi_details = active_wifi
             wifi_connected = True
-        wifi_addresses = _device_ipv4(wifi_iface)
+        wifi_addresses = _device_ipv4(status_wifi_iface)
         if wifi_addresses:
             wifi_ip = wifi_addresses[0].split("/", 1)[0]
-        wifi_gateway = _device_gateway(wifi_iface)
-        wifi_dns = _device_dns(wifi_iface)
+        wifi_gateway = _device_gateway(status_wifi_iface)
+        wifi_dns = _device_dns(status_wifi_iface)
 
     hotspot_active = hotspot_is_active() or _hostapd_hotspot_active()
     hostapd_hotspot = _hostapd_hotspot_active()
@@ -484,12 +534,14 @@ def status() -> dict[str, Any]:
     wifi_hardware_available = wifi_iface is not None or bool(physical_wifi)
     if wifi_iface is None and physical_wifi:
         wifi_iface = physical_wifi[0]
+    if status_wifi_iface is not None:
+        wifi_iface = status_wifi_iface
 
     # Prefer the LAN uplink for "connected" reporting. Setup hotspot can run
     # at the same time on wlan0 without replacing ethernet.
     if ethernet_connected:
         connection_type = "ethernet"
-    elif wifi_connected and not hotspot_active:
+    elif wifi_connected:
         connection_type = "wifi"
     elif hotspot_active:
         connection_type = "hotspot"
@@ -527,12 +579,15 @@ def status() -> dict[str, Any]:
         security = None
 
     wifi_scan_blocked_reason = None
-    if hotspot_active:
+    client_iface = client_wifi_interface()
+    if not wifi_hardware_available:
+        wifi_scan_blocked_reason = "No Wi-Fi adapter was detected."
+    elif client_iface is None and hotspot_radio_in_use():
         wifi_scan_blocked_reason = (
-            "The setup hotspot is using the Wi-Fi radio. "
-            "Stop the hotspot to scan for nearby networks."
+            "The setup hotspot is using the onboard Wi-Fi radio. "
+            "Plug in a USB Wi-Fi adapter, or stop the hotspot to scan."
         )
-    elif not wifi_hardware_available:
+    elif client_iface is None:
         wifi_scan_blocked_reason = "No Wi-Fi adapter was detected."
     elif available and not _wifi_devices():
         wifi_scan_blocked_reason = (
@@ -545,6 +600,8 @@ def status() -> dict[str, Any]:
         "ethernet_available": ethernet_iface is not None,
         "interface": primary_interface,
         "wifi_interface": wifi_iface,
+        "client_wifi_interface": client_iface,
+        "hotspot_interface": HOTSPOT_INTERFACE if hotspot_active else None,
         "ethernet_interface": ethernet_iface,
         "hostname": _hostname(),
         "local_hostname": f"{_hostname()}.local",
@@ -580,8 +637,8 @@ def status() -> dict[str, Any]:
         },
         "wifi": {
             "available": wifi_hardware_available,
-            "connected": wifi_connected and not hotspot_active,
-            "interface": wifi_iface,
+            "connected": wifi_connected,
+            "interface": client_iface or wifi_iface,
             "connection_name": wifi_connection,
             "ssid": wifi_details.get("ssid"),
             "signal": wifi_details.get("signal"),
@@ -608,22 +665,22 @@ def scan_wifi(rescan: bool = True) -> dict[str, Any]:
     Scan for nearby Wi-Fi networks.
 
     Duplicate SSIDs are combined, keeping the strongest signal.
+    Uses a client Wi-Fi adapter when the setup hotspot owns wlan0.
     """
 
-    if _hostapd_hotspot_active() or hotspot_is_active():
-        return {
-            "ok": False,
-            "message": (
-                "The setup hotspot is using the Wi-Fi radio. "
-                "Stop the hotspot first, then scan for networks."
-            ),
-            "interface": wifi_interface(),
-            "networks": [],
-        }
-
-    interface = wifi_interface()
+    interface = client_wifi_interface()
 
     if interface is None:
+        if hotspot_radio_in_use():
+            return {
+                "ok": False,
+                "message": (
+                    "The setup hotspot is using the onboard Wi-Fi radio. "
+                    "Plug in a USB Wi-Fi adapter, or stop the hotspot to scan."
+                ),
+                "interface": None,
+                "networks": [],
+            }
         return {
             "ok": False,
             "message": "No Wi-Fi adapter was detected.",
@@ -631,7 +688,19 @@ def scan_wifi(rescan: bool = True) -> dict[str, Any]:
             "networks": [],
         }
 
-    if not _wifi_devices():
+    # Only block when the only radio is the hotspot AP itself.
+    if interface == HOTSPOT_INTERFACE and hotspot_radio_in_use():
+        return {
+            "ok": False,
+            "message": (
+                "The setup hotspot is using the onboard Wi-Fi radio. "
+                "Plug in a USB Wi-Fi adapter, or stop the hotspot to scan."
+            ),
+            "interface": interface,
+            "networks": [],
+        }
+
+    if not any(device["device"] == interface for device in _wifi_devices()):
         return {
             "ok": False,
             "message": (
@@ -801,7 +870,7 @@ def connect_wifi(
     Open networks may use an empty password.
     """
 
-    interface = wifi_interface()
+    interface = client_wifi_interface()
 
     if interface is None:
         return CommandResult(
@@ -828,8 +897,10 @@ def connect_wifi(
         else ""
     )
 
-    # Turn off the setup hotspot before trying to join another network.
-    if hotspot_is_active():
+    # Only tear down the setup hotspot when we must reuse its radio.
+    if interface == HOTSPOT_INTERFACE and hotspot_radio_in_use():
+        stop_hotspot()
+    elif hotspot_is_active() and interface == HOTSPOT_INTERFACE:
         stop_hotspot()
 
     command = [

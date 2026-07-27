@@ -108,7 +108,7 @@ def wifi_connect(
     """
     Connect MineBox to a selected Wi-Fi network.
 
-    The hotspot is stopped automatically before connecting.
+    The USB Wi-Fi client adapter is used when the setup hotspot owns wlan0.
     """
 
     result = network.connect_wifi(

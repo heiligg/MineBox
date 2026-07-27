@@ -638,7 +638,7 @@
 
         const wifiSection = createSection(
             "Nearby Wi-Fi networks",
-            "Scan for wireless networks and connect MineBox."
+            "Scan with the USB Wi-Fi adapter while the setup hotspot stays on the onboard radio."
         );
 
         scanButton = createButton(
