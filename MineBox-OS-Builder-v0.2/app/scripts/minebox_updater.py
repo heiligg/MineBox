@@ -135,15 +135,61 @@ def start_service(root: Path, mode: str, restart_command: str, data_root: Path) 
         )
 
 
+def _tls_enabled() -> bool:
+    return Path("/var/lib/minebox/tls/enabled").is_file()
+
+
+def _health_urls(preferred: str) -> list[str]:
+    preferred = (preferred or "").strip() or "http://127.0.0.1:8080/api/v1/health"
+    urls: list[str] = []
+
+    def add(url: str) -> None:
+        if url and url not in urls:
+            urls.append(url)
+
+    if preferred.startswith("https://"):
+        add(preferred)
+        add("http://" + preferred[len("https://") :])
+    elif preferred.startswith("http://"):
+        if _tls_enabled():
+            add("https://" + preferred[len("http://") :])
+            add(preferred)
+        else:
+            add(preferred)
+            add("https://" + preferred[len("http://") :])
+    else:
+        add(preferred)
+
+    if _tls_enabled():
+        add("https://127.0.0.1:8080/api/v1/health")
+        add("http://127.0.0.1:8080/api/v1/health")
+    else:
+        add("http://127.0.0.1:8080/api/v1/health")
+        add("https://127.0.0.1:8080/api/v1/health")
+    return urls
+
+
+def _probe_health(url: str, timeout: float = 3.0) -> bool:
+    context = None
+    if url.startswith("https://"):
+        import ssl
+
+        context = ssl._create_unverified_context()
+    with urllib.request.urlopen(url, timeout=timeout, context=context) as response:
+        return 200 <= int(response.status) < 500
+
+
 def healthy(url: str, timeout: int = 45) -> bool:
+    candidates = _health_urls(url)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(url, timeout=3) as response:
-                if 200 <= response.status < 500:
+        for candidate in candidates:
+            try:
+                if _probe_health(candidate):
                     return True
-        except Exception:
-            time.sleep(1)
+            except Exception:
+                continue
+        time.sleep(1)
     return False
 
 

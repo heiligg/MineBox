@@ -180,15 +180,64 @@ def copy_app_tree(app_dir: Path, destination: Path, builder_root: Path) -> None:
         shutil.copy2(requirements, destination / "requirements.txt")
 
 
+def _tls_enabled() -> bool:
+    return Path("/var/lib/minebox/tls/enabled").is_file()
+
+
+def _health_urls(preferred: str) -> list[str]:
+    """Return HTTP/HTTPS health URLs to try (dashboard may be TLS-only)."""
+    preferred = (preferred or "").strip() or "http://127.0.0.1:8080/api/v1/health"
+    urls: list[str] = []
+
+    def add(url: str) -> None:
+        if url and url not in urls:
+            urls.append(url)
+
+    if preferred.startswith("https://"):
+        add(preferred)
+        add("http://" + preferred[len("https://") :])
+    elif preferred.startswith("http://"):
+        if _tls_enabled():
+            add("https://" + preferred[len("http://") :])
+            add(preferred)
+        else:
+            add(preferred)
+            add("https://" + preferred[len("http://") :])
+    else:
+        add(preferred)
+
+    # Always include the local defaults last as a safety net.
+    if _tls_enabled():
+        add("https://127.0.0.1:8080/api/v1/health")
+        add("http://127.0.0.1:8080/api/v1/health")
+    else:
+        add("http://127.0.0.1:8080/api/v1/health")
+        add("https://127.0.0.1:8080/api/v1/health")
+    return urls
+
+
+def _probe_health(url: str, timeout: float = 3.0) -> bool:
+    context = None
+    if url.startswith("https://"):
+        import ssl
+
+        context = ssl._create_unverified_context()
+    with urllib.request.urlopen(url, timeout=timeout, context=context) as response:
+        return 200 <= int(response.status) < 500
+
+
 def healthy(url: str, timeout: int = 60) -> bool:
+    """Wait until the dashboard answers on HTTP and/or HTTPS."""
+    candidates = _health_urls(url)
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        try:
-            with urllib.request.urlopen(url, timeout=3) as response:
-                if 200 <= int(response.status) < 500:
+        for candidate in candidates:
+            try:
+                if _probe_health(candidate):
                     return True
-        except (urllib.error.URLError, TimeoutError, OSError):
-            time.sleep(1)
+            except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+                continue
+        time.sleep(1)
     return False
 
 
