@@ -365,10 +365,35 @@ def install_systemd_units(target: Path, dev: bool) -> None:
     )
 
 
+def install_networkmanager_polkit(target: Path, dev: bool) -> None:
+    """Allow the minebox user to control NetworkManager from the dashboard."""
+    if dev:
+        return
+    source = target / "services" / "polkit" / "10-minebox-networkmanager.rules"
+    if not source.is_file():
+        return
+    destination = Path("/etc/polkit-1/rules.d/10-minebox-networkmanager.rules")
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
+        os.chmod(destination, 0o644)
+    except OSError as exc:
+        print(f"warning: could not install NetworkManager polkit rule: {exc}", flush=True)
+        return
+    subprocess.run(
+        ["systemctl", "try-reload-or-restart", "polkit.service"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
 def install_minecraft_permissions(target: Path, dev: bool) -> None:
     """Make /opt/minecraft writable by the minebox dashboard user."""
     if dev:
         return
+    install_networkmanager_polkit(target, dev)
     script = target / "scripts" / "minebox_fix_minecraft_perms.py"
     if script.is_file():
         run(["chmod", "0755", str(script)])

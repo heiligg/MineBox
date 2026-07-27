@@ -57,6 +57,13 @@ if [ -f /opt/minebox/scripts/minebox_api_run.py ]; then
   chmod 0755 /opt/minebox/scripts/minebox_api_run.py
 fi
 
+# Allow minebox-api to scan/join Wi-Fi via NetworkManager without a desktop session.
+if [ -f /opt/minebox/services/polkit/10-minebox-networkmanager.rules ]; then
+  install -d /etc/polkit-1/rules.d
+  install -m 0644 /opt/minebox/services/polkit/10-minebox-networkmanager.rules \
+    /etc/polkit-1/rules.d/10-minebox-networkmanager.rules
+fi
+
 mkdir -p /var/lib/minebox /var/lib/minebox/updates /var/log/minebox
 chown -R minebox:minebox /var/lib/minebox /var/log/minebox
 

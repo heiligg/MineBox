@@ -65,6 +65,12 @@ install -m 0644 "$TARGET_DIR/services/minebox.service" /etc/systemd/system/mineb
 install -m 0644 "$TARGET_DIR/services/minebox-maintenance.service" /etc/systemd/system/minebox-maintenance.service
 install -m 0644 "$TARGET_DIR/services/minebox-maintenance.timer" /etc/systemd/system/minebox-maintenance.timer
 
+if [ -f "$TARGET_DIR/services/polkit/10-minebox-networkmanager.rules" ]; then
+  install -d /etc/polkit-1/rules.d
+  install -m 0644 "$TARGET_DIR/services/polkit/10-minebox-networkmanager.rules" \
+    /etc/polkit-1/rules.d/10-minebox-networkmanager.rules
+fi
+
 # The image now uses hostapd + dnsmasq. Never enable the legacy NetworkManager
 # hotspot guard because it would compete for wlan0 and disconnect clients.
 systemctl disable --now minebox-network.service >/dev/null 2>&1 || true

@@ -1,0 +1,10 @@
+/* Allow the MineBox dashboard user to manage NetworkManager without a GUI session.
+ * Needed so minebox-api (User=minebox) can scan/join Wi-Fi on USB adapters. */
+polkit.addRule(function (action, subject) {
+    if (subject.user !== "minebox") {
+        return;
+    }
+    if (action.id.indexOf("org.freedesktop.NetworkManager.") === 0) {
+        return polkit.Result.YES;
+    }
+});
