@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 import socket
 import struct
+import threading
+import time
 from pathlib import Path
 
 from config import RCON_HOST, RCON_PASSWORD, RCON_PORT
@@ -13,6 +15,12 @@ from services.system import CommandResult
 SERVERDATA_AUTH = 3
 SERVERDATA_EXECCOMMAND = 2
 SERVERDATA_RESPONSE_VALUE = 0
+
+_LOCK = threading.RLock()
+_COOLDOWN_UNTIL = 0.0
+_LIST_CACHE: tuple[float, CommandResult] | None = None
+_LIST_CACHE_TTL = 4.0
+_COOLDOWN_SECONDS = 20.0
 
 
 def _packet(request_id: int, packet_type: int, body: str) -> bytes:
@@ -42,6 +50,21 @@ def _recv_packet(sock: socket.socket) -> tuple[int, int, str]:
     request_id, packet_type = struct.unpack("<ii", payload[:8])
     body = payload[8:-2].decode("utf-8", errors="replace")
     return request_id, packet_type, body
+
+
+def _drain_optional_packet(sock: socket.socket, timeout: float = 0.05) -> None:
+    """1.12 often sends an extra empty packet after auth; ignore it."""
+    previous = sock.gettimeout()
+    try:
+        sock.settimeout(timeout)
+        _recv_packet(sock)
+    except (OSError, ValueError, ConnectionError, struct.error, TimeoutError):
+        return
+    finally:
+        try:
+            sock.settimeout(previous)
+        except OSError:
+            pass
 
 
 def _read_properties(path: Path) -> dict[str, str]:
@@ -154,45 +177,119 @@ def ensure_properties(server_dir: Path | None = None) -> dict[str, str]:
     return updates
 
 
+def port_is_open(host: str, port: int, timeout: float = 0.4) -> bool:
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _port_open(host: str, port: int, timeout: float = 0.4) -> bool:
+    return port_is_open(host, port, timeout=timeout)
+
+
+def _mark_cooldown(seconds: float | None = None) -> None:
+    global _COOLDOWN_UNTIL, _LIST_CACHE
+    _COOLDOWN_UNTIL = time.monotonic() + (
+        _COOLDOWN_SECONDS if seconds is None else max(0.5, float(seconds))
+    )
+    _LIST_CACHE = None
+
+
+def clear_cooldown() -> None:
+    """Allow immediate RCON retries (e.g. after Minecraft restarts)."""
+    global _COOLDOWN_UNTIL, _LIST_CACHE
+    _COOLDOWN_UNTIL = 0.0
+    _LIST_CACHE = None
+
+
 def send(command: str, timeout: float = 4.0) -> CommandResult:
     command = command.strip()
     if not command:
         return CommandResult(False, stderr="RCON command was empty.")
 
-    host, port, password = resolve_credentials()
+    global _LIST_CACHE
 
-    try:
-        with socket.create_connection((host, int(port)), timeout=timeout) as sock:
-            sock.settimeout(timeout)
-            auth_id = 100
-            sock.sendall(_packet(auth_id, SERVERDATA_AUTH, password))
-            response_id, _response_type, _response_body = _recv_packet(sock)
-            if response_id == -1:
-                return CommandResult(
-                    False,
-                    stderr=(
-                        "RCON authentication failed. MineBox will repair "
-                        "enable-rcon / rcon.password on the next server restart."
-                    ),
-                )
+    # Cache frequent "list" polls so the dashboard does not open a new
+    # Minecraft 1.12 RCON socket every couple of seconds.
+    if command.lower() == "list" and _LIST_CACHE is not None:
+        cached_at, cached = _LIST_CACHE
+        if time.monotonic() - cached_at < _LIST_CACHE_TTL and cached.ok:
+            return cached
 
-            command_id = 101
-            sock.sendall(_packet(command_id, SERVERDATA_EXECCOMMAND, command))
-            response_id, response_type, body = _recv_packet(sock)
-            if response_id != command_id:
-                return CommandResult(
-                    False, stderr="RCON returned an unexpected response."
-                )
-            if response_type not in (
-                SERVERDATA_RESPONSE_VALUE,
-                SERVERDATA_EXECCOMMAND,
-            ):
-                return CommandResult(
-                    False, stderr="RCON returned an invalid packet type."
-                )
-            return CommandResult(True, stdout=body.strip())
-    except (OSError, ValueError, ConnectionError, struct.error) as exc:
-        return CommandResult(False, stderr=f"RCON unavailable: {exc}")
+    with _LOCK:
+        if time.monotonic() < _COOLDOWN_UNTIL:
+            return CommandResult(
+                False,
+                stderr=(
+                    "RCON is cooling down after a connection failure. "
+                    "Minecraft 1.12 RCON is fragile; try again shortly "
+                    "or restart the server if it stays down."
+                ),
+            )
+
+        host, port, password = resolve_credentials()
+        if not _port_open(host, int(port)):
+            _mark_cooldown(3.0)
+            return CommandResult(
+                False,
+                stderr=(
+                    "RCON port is not listening. On Minecraft 1.12/Forge the "
+                    "RCON thread can die until the server is restarted."
+                ),
+            )
+
+        try:
+            with socket.create_connection((host, int(port)), timeout=timeout) as sock:
+                sock.settimeout(timeout)
+                auth_id = 100
+                sock.sendall(_packet(auth_id, SERVERDATA_AUTH, password))
+                response_id, _response_type, _response_body = _recv_packet(sock)
+                if response_id == -1:
+                    return CommandResult(
+                        False,
+                        stderr=(
+                            "RCON authentication failed. MineBox will repair "
+                            "enable-rcon / rcon.password on the next server restart."
+                        ),
+                    )
+                _drain_optional_packet(sock)
+
+                command_id = 101
+                sock.sendall(_packet(command_id, SERVERDATA_EXECCOMMAND, command))
+                response_id, response_type, body = _recv_packet(sock)
+                # Some 1.12 builds return an empty packet before the real body.
+                if not body and response_type in (
+                    SERVERDATA_RESPONSE_VALUE,
+                    SERVERDATA_EXECCOMMAND,
+                ):
+                    try:
+                        response_id, response_type, body = _recv_packet(sock)
+                    except (OSError, ValueError, ConnectionError, struct.error):
+                        pass
+                if response_id != command_id and response_id != -1:
+                    if response_type not in (
+                        SERVERDATA_RESPONSE_VALUE,
+                        SERVERDATA_EXECCOMMAND,
+                    ):
+                        return CommandResult(
+                            False, stderr="RCON returned an unexpected response."
+                        )
+                if response_type not in (
+                    SERVERDATA_RESPONSE_VALUE,
+                    SERVERDATA_EXECCOMMAND,
+                ):
+                    return CommandResult(
+                        False, stderr="RCON returned an invalid packet type."
+                    )
+                result = CommandResult(True, stdout=body.strip())
+                if command.lower() == "list":
+                    _LIST_CACHE = (time.monotonic(), result)
+                return result
+        except (OSError, ValueError, ConnectionError, struct.error) as exc:
+            _mark_cooldown()
+            return CommandResult(False, stderr=f"RCON unavailable: {exc}")
 
 
 def command(command_text: str, timeout: float = 4.0) -> str:

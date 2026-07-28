@@ -380,6 +380,10 @@ def start() -> CommandResult:
             stderr=(result.stderr or result.stdout or "Start failed.")
             + _recent_failure_hint(),
         )
+    try:
+        rcon.clear_cooldown()
+    except Exception:
+        pass
     if not wait_for_state(True, timeout=30):
         return CommandResult(
             False,
@@ -888,10 +892,16 @@ def save_server_settings(payload: dict[str, object]) -> dict[str, object]:
 
 def _wait_for_rcon(timeout: int = 120) -> bool:
     deadline = time.monotonic() + timeout
+    rcon.clear_cooldown()
     while time.monotonic() < deadline:
         if not is_running():
             time.sleep(1.0)
             continue
+        host, port, _password = rcon.resolve_credentials()
+        if not rcon.port_is_open(host, int(port)):
+            time.sleep(1.0)
+            continue
+        rcon.clear_cooldown()
         result = rcon.send("list", timeout=3.0)
         if result.ok:
             return True
