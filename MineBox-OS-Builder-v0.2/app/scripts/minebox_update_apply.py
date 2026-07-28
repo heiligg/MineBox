@@ -451,6 +451,44 @@ def install_hotspot_helpers(target: Path, dev: bool) -> None:
         text=True,
         timeout=15,
     )
+    subprocess.run(
+        ["sysctl", "-w", "net.ipv4.conf.all.rp_filter=0"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    subprocess.run(
+        ["sysctl", "-w", "net.ipv4.conf.wlan0.rp_filter=0"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+
+    ssh_dropin_src = target / "services" / "hotspot" / "50-minebox-ssh.conf"
+    if ssh_dropin_src.is_file():
+        raw = ssh_dropin_src.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        ssh_dir = Path("/etc/ssh/sshd_config.d")
+        ssh_dir.mkdir(parents=True, exist_ok=True)
+        ssh_dst = ssh_dir / "50-minebox.conf"
+        if _file_bytes(ssh_dst) != raw:
+            ssh_dst.write_bytes(raw)
+            os.chmod(ssh_dst, 0o644)
+            subprocess.run(
+                ["systemctl", "try-reload-or-restart", "ssh.service"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            subprocess.run(
+                ["systemctl", "try-reload-or-restart", "sshd.service"],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
 
     run(["systemctl", "daemon-reload"], timeout=60)
     subprocess.run(
