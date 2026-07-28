@@ -420,7 +420,14 @@ def install_hotspot_helpers(target: Path, dev: bool) -> None:
             sysctl_dst.parent.mkdir(parents=True, exist_ok=True)
             sysctl_dst.write_bytes(raw)
             os.chmod(sysctl_dst, 0o644)
-    Path("/proc/sys/net/ipv4/ip_forward").write_text("1", encoding="utf-8")
+    Path("/proc/sys/net/ipv4/ip_forward").write_text("1\n", encoding="utf-8")
+    subprocess.run(
+        ["sysctl", "-w", "net.ipv4.ip_forward=1"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
 
     run(["systemctl", "daemon-reload"], timeout=60)
     subprocess.run(
