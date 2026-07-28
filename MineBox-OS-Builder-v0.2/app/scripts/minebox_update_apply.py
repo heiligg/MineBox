@@ -387,6 +387,23 @@ def install_hotspot_helpers(target: Path, dev: bool) -> None:
             os.chmod(dnsmasq_dst, 0o644)
             restart_units.append("dnsmasq.service")
 
+    # Debian dnsmasq injects --local-service which can break some client resolvers.
+    dnsmasq_dropin_dir = Path("/etc/systemd/system/dnsmasq.service.d")
+    dnsmasq_dropin_dir.mkdir(parents=True, exist_ok=True)
+    dnsmasq_dropin = dnsmasq_dropin_dir / "minebox.conf"
+    dnsmasq_dropin_body = (
+        "[Service]\n"
+        "ExecStart=\n"
+        "ExecStart=/usr/sbin/dnsmasq -k "
+        "--conf-file=/etc/dnsmasq.conf "
+        "--conf-dir=/etc/dnsmasq.d,.dpkg-dist,.dpkg-old,.dpkg-new\n"
+    )
+    previous = _file_bytes(dnsmasq_dropin)
+    dnsmasq_dropin.write_text(dnsmasq_dropin_body, encoding="utf-8")
+    if previous != dnsmasq_dropin_body.encode("utf-8"):
+        if "dnsmasq.service" not in restart_units:
+            restart_units.append("dnsmasq.service")
+
     # Hotspot internet sharing: NAT + forward. Without these, clients get
     # "No internet" / DNS failures even though the Pi itself is online.
     nft_src = target / "services" / "hotspot" / "minebox-hotspot.nft"
@@ -420,9 +437,15 @@ def install_hotspot_helpers(target: Path, dev: bool) -> None:
             sysctl_dst.parent.mkdir(parents=True, exist_ok=True)
             sysctl_dst.write_bytes(raw)
             os.chmod(sysctl_dst, 0o644)
-    Path("/proc/sys/net/ipv4/ip_forward").write_text("1\n", encoding="utf-8")
     subprocess.run(
         ["sysctl", "-w", "net.ipv4.ip_forward=1"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    subprocess.run(
+        ["sysctl", "-w", "net.ipv6.conf.wlan0.disable_ipv6=1"],
         check=False,
         capture_output=True,
         text=True,

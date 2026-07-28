@@ -3,11 +3,20 @@
 flush ruleset
 
 table inet minebox_filter {
+    chain input {
+        type filter hook input priority 0; policy accept;
+    }
+
     chain forward {
         type filter hook forward priority 0; policy drop;
 
         ct state established,related accept
+        ct state invalid drop
+
+        # Hotspot clients -> upstream (wifi/ethernet)
         iifname "wlan0" oifname != "wlan0" ip saddr 192.168.4.0/24 accept
+
+        # Return traffic to hotspot clients
         iifname != "wlan0" oifname "wlan0" ip daddr 192.168.4.0/24 ct state established,related accept
     }
 }
