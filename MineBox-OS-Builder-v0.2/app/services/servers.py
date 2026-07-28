@@ -256,8 +256,9 @@ def update_server_launch(
 def update_memory_gb(server_id: str | None, memory_gb: int) -> ServerInstance:
     """Update JVM heap for a server and rewrite start scripts / JVM args."""
     memory = max(1, min(int(memory_gb), 64))
-    clean_id = slugify_server_id(server_id or "")
-    if not clean_id:
+    if server_id and str(server_id).strip():
+        clean_id = slugify_server_id(str(server_id))
+    else:
         active = active_server()
         if active is None:
             raise ServerManagerError("No active Minecraft server is configured.")
