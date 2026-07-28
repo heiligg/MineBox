@@ -313,6 +313,13 @@ def write_commit(path: Path, commit: str) -> None:
     path.write_text(commit + "\n", encoding="utf-8")
 
 
+def _file_bytes(path: Path) -> bytes | None:
+    try:
+        return path.read_bytes()
+    except OSError:
+        return None
+
+
 def install_hotspot_helpers(target: Path, dev: bool) -> None:
     """Install captive portal + refresh hostapd/dnsmasq defaults for setup Wi-Fi."""
     if dev:
@@ -334,21 +341,56 @@ def install_hotspot_helpers(target: Path, dev: bool) -> None:
             ]
         )
 
+    restart_units: list[str] = []
+
     hostapd_src = target / "services" / "hotspot" / "hostapd.conf"
+    hostapd_dst = Path("/etc/hostapd/hostapd.conf")
     if hostapd_src.is_file():
-        run(["install", "-m", "0644", str(hostapd_src), "/etc/hostapd/hostapd.conf"])
+        # hostapd treats CR as part of values; Windows checkouts break the AP.
+        raw = hostapd_src.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        current = _file_bytes(hostapd_dst)
+        if current != raw:
+            hostapd_dst.parent.mkdir(parents=True, exist_ok=True)
+            hostapd_dst.write_bytes(raw)
+            os.chmod(hostapd_dst, 0o644)
+            restart_units.append("hostapd.service")
+
+    # SoftAP client drops are common when brcmfmac leaves power-save on.
+    dropin_dir = Path("/etc/systemd/system/hostapd.service.d")
+    dropin_dir.mkdir(parents=True, exist_ok=True)
+    dropin = dropin_dir / "minebox.conf"
+    dropin_body = (
+        "[Unit]\n"
+        "After=systemd-networkd.service\n"
+        "Wants=systemd-networkd.service\n"
+        "\n"
+        "[Service]\n"
+        "ExecStartPre=/usr/sbin/rfkill unblock wifi\n"
+        "ExecStartPost=/bin/sh -c '/sbin/iwconfig wlan0 power off 2>/dev/null || "
+        "/usr/sbin/iw dev wlan0 set power_save off 2>/dev/null || true'\n"
+        "Restart=on-failure\n"
+        "RestartSec=3\n"
+    )
+    previous_dropin = _file_bytes(dropin)
+    dropin.write_text(dropin_body, encoding="utf-8")
+    if previous_dropin != dropin_body.encode("utf-8"):
+        if "hostapd.service" not in restart_units:
+            restart_units.append("hostapd.service")
 
     dnsmasq_src = target / "services" / "hotspot" / "dnsmasq-minebox.conf"
+    dnsmasq_dst = Path("/etc/dnsmasq.d/minebox.conf")
     if dnsmasq_src.is_file():
-        run(
-            [
-                "install",
-                "-m",
-                "0644",
-                str(dnsmasq_src),
-                "/etc/dnsmasq.d/minebox.conf",
-            ]
-        )
+        if _file_bytes(dnsmasq_src) != _file_bytes(dnsmasq_dst):
+            run(
+                [
+                    "install",
+                    "-m",
+                    "0644",
+                    str(dnsmasq_src),
+                    str(dnsmasq_dst),
+                ]
+            )
+            restart_units.append("dnsmasq.service")
 
     run(["systemctl", "daemon-reload"], timeout=60)
     subprocess.run(
@@ -358,8 +400,15 @@ def install_hotspot_helpers(target: Path, dev: bool) -> None:
         text=True,
         timeout=60,
     )
-    # Reload AP/DHCP so captive DNS and hostapd tweaks take effect.
-    for unit in ("hostapd.service", "dnsmasq.service"):
+    # Always refresh captive (port 80 front-door); only bounce AP/DHCP when conf changed.
+    subprocess.run(
+        ["systemctl", "try-restart", "minebox-captive.service"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    for unit in restart_units:
         subprocess.run(
             ["systemctl", "try-restart", unit],
             check=False,

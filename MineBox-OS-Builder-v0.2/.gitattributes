@@ -1,0 +1,3 @@
+app/services/hotspot/*.conf text eol=lf
+pi-gen/stage-minebox/02-dedicated-hotspot/files/hostapd.conf text eol=lf
+pi-gen/stage-minebox/02-dedicated-hotspot/files/dnsmasq-minebox.conf text eol=lf

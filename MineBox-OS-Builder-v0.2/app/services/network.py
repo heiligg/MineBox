@@ -1227,7 +1227,8 @@ def start_hotspot(
         True,
         stdout=(
             f"MineBox hotspot {ssid} started. "
-            "Open http://192.168.4.1 (or https://192.168.4.1:8080 if HTTPS is on)."
+            "Open http://192.168.4.1 on the setup Wi-Fi (port 80 proxies the dashboard). "
+            "HTTPS direct: https://192.168.4.1:8080 (accept the self-signed warning)."
         ),
     )
 

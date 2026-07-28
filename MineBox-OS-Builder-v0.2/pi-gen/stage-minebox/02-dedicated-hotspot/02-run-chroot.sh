@@ -34,6 +34,8 @@ Wants=systemd-networkd.service
 
 [Service]
 ExecStartPre=/usr/sbin/rfkill unblock wifi
+# brcmfmac defaults to power-save even in AP mode; that drops phone/PC clients.
+ExecStartPost=/bin/sh -c '/sbin/iwconfig wlan0 power off 2>/dev/null || /usr/sbin/iw dev wlan0 set power_save off 2>/dev/null || true'
 Restart=on-failure
 RestartSec=3
 CONF

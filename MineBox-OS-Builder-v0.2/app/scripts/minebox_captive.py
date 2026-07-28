@@ -1,14 +1,15 @@
 #!/usr/bin/python3
-"""Hotspot captive portal + dashboard redirect on port 80.
+"""Hotspot captive portal + HTTP dashboard front-door on port 80.
 
-Phones and PCs often drop Wi-Fi networks that fail connectivity checks, and
-users open http://192.168.4.1 (port 80) while the dashboard listens on 8080
-(optionally HTTPS). This tiny server:
-  - answers Microsoft/Android/Apple captive probes
-  - redirects browsers to the MineBox dashboard
+Phones/PCs open http://192.168.4.1 (port 80). The dashboard listens on 8080
+(optionally HTTPS). This server:
+  - answers Microsoft/Android/Apple captive probes on port 80 (no DNS hijacks)
+  - reverse-proxies everything else to the local dashboard over HTTP so hotspot
+    clients get a working UI without self-signed certificate friction
 """
 from __future__ import annotations
 
+import http.client
 import ssl
 import urllib.error
 import urllib.request
@@ -19,30 +20,55 @@ from pathlib import Path
 TLS_ENABLED = Path("/var/lib/minebox/tls/enabled")
 DASHBOARD_HOST = "192.168.4.1"
 DASHBOARD_PORT = 8080
+# When TLS is on, minebox_api_run exposes plain HTTP on loopback :8081 behind
+# the dual-protocol gateway on :8080. Prefer that for captive reverse-proxy.
+BACKEND_HTTP_PORT = 8081
 
 
-def dashboard_url() -> str:
-    scheme = "https" if TLS_ENABLED.is_file() else "http"
+def tls_on() -> bool:
+    return TLS_ENABLED.is_file()
+
+
+def public_dashboard_url() -> str:
+    scheme = "https" if tls_on() else "http"
     return f"{scheme}://{DASHBOARD_HOST}:{DASHBOARD_PORT}/"
 
 
+def backend_host_port() -> tuple[str, int, bool]:
+    """Return (host, port, use_tls) for the reverse-proxy target."""
+    if tls_on():
+        # Prefer loopback HTTP backend used by the TLS gateway.
+        return ("127.0.0.1", BACKEND_HTTP_PORT, False)
+    return ("127.0.0.1", DASHBOARD_PORT, False)
+
+
 def dashboard_reachable() -> bool:
-    url = dashboard_url().rstrip("/") + "/api/v1/health"
-    context = None
-    if url.startswith("https://"):
-        context = ssl._create_unverified_context()
+    host, port, use_tls = backend_host_port()
+    scheme = "https" if use_tls else "http"
+    url = f"{scheme}://{host}:{port}/api/v1/health"
+    context = ssl._create_unverified_context() if use_tls else None
     try:
         with urllib.request.urlopen(url, timeout=2, context=context) as response:
             return 200 <= int(response.status) < 500
     except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        # Fall back to public HTTPS health when gateway is up but backend port differs.
+        if tls_on():
+            try:
+                url = f"https://127.0.0.1:{DASHBOARD_PORT}/api/v1/health"
+                with urllib.request.urlopen(
+                    url, timeout=2, context=ssl._create_unverified_context()
+                ) as response:
+                    return 200 <= int(response.status) < 500
+            except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+                return False
         return False
 
 
 class CaptiveHandler(BaseHTTPRequestHandler):
-    server_version = "MineBoxCaptive/1.0"
+    server_version = "MineBoxCaptive/1.1"
+    protocol_version = "HTTP/1.1"
 
     def log_message(self, format: str, *args) -> None:  # noqa: A003
-        # Keep journal noise low; hostapd/dnsmasq already show client activity.
         return
 
     def _send(self, code: int, body: bytes, content_type: str) -> None:
@@ -50,80 +76,170 @@ class CaptiveHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(body)
 
-    def _redirect(self, location: str) -> None:
-        body = (
-            f"<!doctype html><html><head><meta http-equiv='refresh' content='0;url={location}'>"
-            f"<title>MineBox</title></head><body>"
-            f"<p>Open the MineBox dashboard: "
-            f"<a href='{location}'>{location}</a></p></body></html>"
-        ).encode()
-        self.send_response(302)
-        self.send_header("Location", location)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
-        self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        if self.command != "HEAD":
-            self.wfile.write(body)
+    def _is_captive_probe(self, path: str) -> bool:
+        if path.endswith("/connecttest.txt") or path == "/connecttest.txt":
+            return True
+        if path.endswith("/ncsi.txt") or path == "/ncsi.txt":
+            return True
+        if "generate_204" in path or path.endswith("/gen_204"):
+            return True
+        if "hotspot-detect.html" in path or "library/test/success.html" in path:
+            return True
+        if path in {"/success.txt", "/generate_204"}:
+            return True
+        return False
 
-    def do_HEAD(self) -> None:  # noqa: N802
-        self.do_GET()
-
-    def do_GET(self) -> None:  # noqa: N802
-        path = (self.path or "/").split("?", 1)[0].lower()
-
-        # Microsoft NCSI / Windows connectivity check
+    def _answer_probe(self, path: str) -> None:
         if path.endswith("/connecttest.txt") or path == "/connecttest.txt":
             self._send(200, b"Microsoft Connect Test", "text/plain")
             return
         if path.endswith("/ncsi.txt") or path == "/ncsi.txt":
             self._send(200, b"Microsoft NCSI", "text/plain")
             return
-        if "generate_204" in path or path.endswith("/gen_204"):
+        if "generate_204" in path or path.endswith("/gen_204") or path in {
+            "/success.txt",
+            "/generate_204",
+        }:
             self.send_response(204)
             self.send_header("Content-Length", "0")
             self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
             self.end_headers()
             return
         if "hotspot-detect.html" in path or "library/test/success.html" in path:
-            self._send(200, b"<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>", "text/html")
+            self._send(
+                200,
+                b"<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>",
+                "text/html",
+            )
             return
-        if path in {"/success.txt", "/generate_204"}:
-            self.send_response(204)
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return
+        self.send_response(204)
+        self.send_header("Content-Length", "0")
+        self.send_header("Connection", "close")
+        self.end_headers()
 
-        target = dashboard_url()
+    def _landing_page(self) -> None:
+        target = public_dashboard_url()
         note = ""
         if not dashboard_reachable():
-            note = (
-                "<p>The dashboard is starting. Wait a few seconds and refresh.</p>"
+            note = "<p>The dashboard is starting. Wait a few seconds and refresh.</p>"
+        https_hint = ""
+        if tls_on():
+            https_hint = (
+                "<p>This page also proxies the dashboard at "
+                "<a href='/'><code>http://192.168.4.1/</code></a> "
+                "(no certificate warning). "
+                f"Direct HTTPS: <a href='{target}'>{target}</a> "
+                "(browser will warn on the self-signed cert — choose Advanced → Proceed).</p>"
             )
         body = (
             "<!doctype html><html><head>"
-            f"<meta http-equiv='refresh' content='1;url={target}'>"
+            "<meta http-equiv='refresh' content='3;url=/'>"
             "<meta name='viewport' content='width=device-width, initial-scale=1'>"
-            "<title>MineBox Setup</title></head><body style='font-family:sans-serif;padding:24px'>"
+            "<title>MineBox Setup</title></head>"
+            "<body style='font-family:sans-serif;padding:24px'>"
             "<h1>MineBox</h1>"
-            f"<p>Continue to the dashboard:</p>"
-            f"<p><a href='{target}'>{target}</a></p>"
-            f"{note}"
-            "<p>Password for this Wi-Fi is usually <code>mineboxsetup</code> "
-            "unless you changed it.</p>"
+            "<p>Waiting for the dashboard…</p>"
+            "<p><a href='/'>Retry</a></p>"
+            f"{https_hint}{note}"
+            "<p>Wi-Fi password is usually <code>mineboxsetup</code> unless you changed it.</p>"
             "</body></html>"
         ).encode()
-        if path in {"/", "/index.html", "/hotspot", "/generate_204"}:
-            self._send(200, body, "text/html; charset=utf-8")
+        self._send(200, body, "text/html; charset=utf-8")
+
+    def _proxy(self) -> None:
+        host, port, use_tls = backend_host_port()
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        body = self.rfile.read(length) if length > 0 else None
+
+        try:
+            if use_tls:
+                conn: http.client.HTTPConnection = http.client.HTTPSConnection(
+                    host, port, timeout=30, context=ssl._create_unverified_context()
+                )
+            else:
+                conn = http.client.HTTPConnection(host, port, timeout=30)
+            headers = {
+                key: value
+                for key, value in self.headers.items()
+                if key.lower()
+                not in {"host", "connection", "content-length", "transfer-encoding"}
+            }
+            headers["Host"] = f"{host}:{port}"
+            headers["Connection"] = "close"
+            conn.request(self.command, self.path, body=body, headers=headers)
+            upstream = conn.getresponse()
+            payload = upstream.read()
+            self.send_response(upstream.status, upstream.reason)
+            for key, value in upstream.getheaders():
+                if key.lower() in {
+                    "transfer-encoding",
+                    "connection",
+                    "content-length",
+                    "content-encoding",
+                }:
+                    continue
+                # Keep users on the port-80 HTTP origin while proxied.
+                if key.lower() == "location":
+                    value = value.replace(
+                        f"https://{DASHBOARD_HOST}:{DASHBOARD_PORT}",
+                        f"http://{DASHBOARD_HOST}",
+                    ).replace(
+                        f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}",
+                        f"http://{DASHBOARD_HOST}",
+                    )
+                self.send_header(key, value)
+            self.send_header("Content-Length", str(len(payload)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            if self.command != "HEAD":
+                self.wfile.write(payload)
+            conn.close()
+        except (OSError, http.client.HTTPException, ValueError):
+            target = public_dashboard_url()
+            body = (
+                "<!doctype html><html><body style='font-family:sans-serif;padding:24px'>"
+                "<h1>MineBox</h1>"
+                "<p>Dashboard is not reachable yet.</p>"
+                f"<p>Try <a href='{target}'>{target}</a></p>"
+                "</body></html>"
+            ).encode()
+            self._send(502, body, "text/html; charset=utf-8")
+
+    def do_HEAD(self) -> None:  # noqa: N802
+        self.do_GET()
+
+    def do_GET(self) -> None:  # noqa: N802
+        path = (self.path or "/").split("?", 1)[0].lower()
+        if self._is_captive_probe(path):
+            self._answer_probe(path)
             return
-        self._redirect(target)
+        # Prefer reverse-proxy so hotspot clients never need the self-signed cert.
+        if dashboard_reachable():
+            self._proxy()
+            return
+        self._landing_page()
 
     def do_POST(self) -> None:  # noqa: N802
-        self.do_GET()
+        path = (self.path or "/").split("?", 1)[0].lower()
+        if self._is_captive_probe(path):
+            self._answer_probe(path)
+            return
+        self._proxy()
+
+    def do_PUT(self) -> None:  # noqa: N802
+        self._proxy()
+
+    def do_PATCH(self) -> None:  # noqa: N802
+        self._proxy()
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        self._proxy()
 
 
 def main() -> int:
