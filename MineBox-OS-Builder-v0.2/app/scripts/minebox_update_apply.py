@@ -119,6 +119,37 @@ def run(
     return result
 
 
+def soft_systemctl(args: list[str], *, timeout: int = 20) -> None:
+    """Best-effort systemctl that must never fail an OTA on hang/timeout."""
+    try:
+        subprocess.run(
+            ["systemctl", *args],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return
+
+
+def restart_dnsmasq_safe() -> None:
+    """Bounce hotspot DHCP/DNS without blocking OTA on systemd hangs."""
+    soft_systemctl(["daemon-reload"], timeout=30)
+    soft_systemctl(["kill", "-s", "SIGKILL", "dnsmasq.service"], timeout=10)
+    subprocess.run(
+        ["killall", "-9", "dnsmasq"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    soft_systemctl(["reset-failed", "dnsmasq.service"], timeout=10)
+    # --no-block avoids the 60s+ hangs we saw from resolvconf/forking helpers.
+    soft_systemctl(["start", "--no-block", "dnsmasq.service"], timeout=15)
+    time.sleep(1.5)
+
+
 def safe_remove(path: Path) -> None:
     if path.is_symlink() or path.is_file():
         path.unlink(missing_ok=True)
@@ -379,13 +410,14 @@ def install_hotspot_helpers(target: Path, dev: bool) -> None:
 
     dnsmasq_src = target / "services" / "hotspot" / "dnsmasq-minebox.conf"
     dnsmasq_dst = Path("/etc/dnsmasq.d/minebox.conf")
+    dnsmasq_needs_bounce = False
     if dnsmasq_src.is_file():
         raw = dnsmasq_src.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
         if _file_bytes(dnsmasq_dst) != raw:
             dnsmasq_dst.parent.mkdir(parents=True, exist_ok=True)
             dnsmasq_dst.write_bytes(raw)
             os.chmod(dnsmasq_dst, 0o644)
-            restart_units.append("dnsmasq.service")
+            dnsmasq_needs_bounce = True
 
     # Keep dnsmasq as Type=simple without Debian resolvconf hooks (those hang).
     dnsmasq_dropin_src = (
@@ -394,32 +426,33 @@ def install_hotspot_helpers(target: Path, dev: bool) -> None:
     dnsmasq_dropin_dir = Path("/etc/systemd/system/dnsmasq.service.d")
     dnsmasq_dropin_dir.mkdir(parents=True, exist_ok=True)
     dnsmasq_dropin = dnsmasq_dropin_dir / "minebox.conf"
+    safe_dropin = (
+        "[Service]\n"
+        "Type=simple\n"
+        "ExecStartPre=\n"
+        "ExecStartPost=\n"
+        "ExecStart=\n"
+        "ExecStart=/usr/sbin/dnsmasq -k "
+        "--conf-file=/etc/dnsmasq.conf "
+        "--conf-dir=/etc/dnsmasq.d,.dpkg-dist,.dpkg-old,.dpkg-new\n"
+    ).encode()
     if dnsmasq_dropin_src.is_file():
         raw = (
             dnsmasq_dropin_src.read_bytes()
             .replace(b"\r\n", b"\n")
             .replace(b"\r", b"\n")
         )
-        if _file_bytes(dnsmasq_dropin) != raw:
-            dnsmasq_dropin.write_bytes(raw)
-            os.chmod(dnsmasq_dropin, 0o644)
-            restart_units.append("dnsmasq.service")
-    elif dnsmasq_dropin.is_file():
-        # Older broken drop-ins without Type=/cleared hooks: replace with safe default.
-        safe = (
-            "[Service]\n"
-            "Type=simple\n"
-            "ExecStartPre=\n"
-            "ExecStartPost=\n"
-            "ExecStart=\n"
-            "ExecStart=/usr/sbin/dnsmasq -k "
-            "--conf-file=/etc/dnsmasq.conf "
-            "--conf-dir=/etc/dnsmasq.d,.dpkg-dist,.dpkg-old,.dpkg-new\n"
-        ).encode()
-        if _file_bytes(dnsmasq_dropin) != safe:
-            dnsmasq_dropin.write_bytes(safe)
-            os.chmod(dnsmasq_dropin, 0o644)
-            restart_units.append("dnsmasq.service")
+    else:
+        raw = safe_dropin
+    if _file_bytes(dnsmasq_dropin) != raw:
+        dnsmasq_dropin.write_bytes(raw)
+        os.chmod(dnsmasq_dropin, 0o644)
+        dnsmasq_needs_bounce = True
+    # Always ensure the drop-in exists even if conf unchanged.
+    elif not dnsmasq_dropin.is_file():
+        dnsmasq_dropin.write_bytes(raw)
+        os.chmod(dnsmasq_dropin, 0o644)
+        dnsmasq_needs_bounce = True
 
     # Hotspot internet sharing: NAT + forward. Without these, clients get
     # "No internet" / DNS failures even though the Pi itself is online.
@@ -508,29 +541,22 @@ def install_hotspot_helpers(target: Path, dev: bool) -> None:
             )
 
     run(["systemctl", "daemon-reload"], timeout=60)
-    subprocess.run(
-        ["systemctl", "enable", "--now", "minebox-captive.service"],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
+    soft_systemctl(["enable", "--now", "minebox-captive.service"], timeout=30)
     # Always refresh captive (port 80 front-door); only bounce AP/DHCP when conf changed.
-    subprocess.run(
-        ["systemctl", "try-restart", "minebox-captive.service"],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
+    soft_systemctl(["try-restart", "minebox-captive.service"], timeout=20)
     for unit in restart_units:
-        subprocess.run(
-            ["systemctl", "try-restart", unit],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=60,
-        )
+        if unit == "dnsmasq.service":
+            continue
+        soft_systemctl(["try-restart", unit], timeout=20)
+    if dnsmasq_needs_bounce or "dnsmasq.service" in restart_units:
+        restart_dnsmasq_safe()
+    # If dnsmasq conf/drop-in already matched but service is dead, revive it.
+    elif subprocess.run(
+        ["systemctl", "is-active", "--quiet", "dnsmasq.service"],
+        check=False,
+        timeout=10,
+    ).returncode != 0:
+        restart_dnsmasq_safe()
 
 
 def install_systemd_units(target: Path, dev: bool) -> None:
