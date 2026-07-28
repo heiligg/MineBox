@@ -1,0 +1,1541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1"
+    >
+
+    <title>Set Up MineBox</title>
+
+    <style>
+        :root {
+            color-scheme: dark;
+            --background: #080b10;
+            --panel: #11161e;
+            --panel-light: #171e28;
+            --border: #273140;
+            --text: #f4f7fb;
+            --muted: #94a2b5;
+            --accent: #65d46e;
+            --accent-dark: #3aaa49;
+            --danger: #ff6b6b;
+            --warning: #ffca62;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            min-height: 100vh;
+            margin: 0;
+            display: grid;
+            place-items: center;
+            padding: 24px;
+            font-family:
+                Inter,
+                ui-sans-serif,
+                system-ui,
+                -apple-system,
+                BlinkMacSystemFont,
+                "Segoe UI",
+                sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(
+                    circle at top,
+                    #17251b 0,
+                    var(--background) 42%
+                );
+        }
+
+        button,
+        input,
+        select {
+            font: inherit;
+        }
+
+        .shell {
+            width: min(780px, 100%);
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 22px;
+        }
+
+        .logo {
+            width: 46px;
+            height: 46px;
+            display: grid;
+            place-items: center;
+            border-radius: 13px;
+            font-size: 23px;
+            font-weight: 900;
+            color: #081009;
+            background: var(--accent);
+            box-shadow: 0 0 30px rgba(101, 212, 110, 0.25);
+        }
+
+        .brand-name {
+            margin: 0;
+            font-size: 28px;
+            letter-spacing: -0.8px;
+        }
+
+        .card {
+            overflow: hidden;
+            border: 1px solid var(--border);
+            border-radius: 22px;
+            background: rgba(17, 22, 30, 0.96);
+            box-shadow: 0 28px 80px rgba(0, 0, 0, 0.38);
+        }
+
+        .progress {
+            height: 5px;
+            background: var(--panel-light);
+        }
+
+        .progress-bar {
+            width: 25%;
+            height: 100%;
+            background: var(--accent);
+            transition: width 220ms ease;
+        }
+
+        .content {
+            min-height: 470px;
+            padding: 42px;
+        }
+
+        .step-label {
+            margin-bottom: 10px;
+            color: var(--accent);
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: 1.4px;
+            text-transform: uppercase;
+        }
+
+        h2 {
+            margin: 0 0 12px;
+            font-size: clamp(27px, 5vw, 39px);
+            letter-spacing: -1.2px;
+        }
+
+        .description {
+            max-width: 610px;
+            margin: 0 0 32px;
+            color: var(--muted);
+            font-size: 17px;
+            line-height: 1.6;
+        }
+
+        .step {
+            display: none;
+        }
+
+        .step.active {
+            display: block;
+            animation: appear 180ms ease;
+        }
+
+        @keyframes appear {
+            from {
+                opacity: 0;
+                transform: translateY(7px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .network-status {
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            margin-bottom: 22px;
+            padding: 17px;
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            background: var(--panel-light);
+        }
+
+        .network-status-icon {
+            width: 38px;
+            height: 38px;
+            flex: 0 0 auto;
+            display: grid;
+            place-items: center;
+            border-radius: 50%;
+            color: #071008;
+            background: var(--accent);
+            font-weight: 900;
+        }
+
+        .network-status-text strong {
+            display: block;
+            margin-bottom: 4px;
+        }
+
+        .network-status-text span {
+            color: var(--muted);
+            line-height: 1.45;
+        }
+
+        .wifi-list {
+            display: grid;
+            gap: 10px;
+            max-height: 230px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+        }
+
+        .wifi-network {
+            width: 100%;
+            padding: 15px 17px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            color: var(--text);
+            text-align: left;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: #0c1118;
+            cursor: pointer;
+        }
+
+        .wifi-network:hover {
+            border-color: var(--accent-dark);
+        }
+
+        .wifi-network.selected {
+            border-color: var(--accent);
+            background: rgba(101, 212, 110, 0.09);
+        }
+
+        .wifi-details {
+            display: grid;
+            gap: 3px;
+        }
+
+        .wifi-details span {
+            color: var(--muted);
+            font-size: 13px;
+        }
+
+        .wifi-signal {
+            color: var(--muted);
+            white-space: nowrap;
+        }
+
+        .network-password {
+            display: none;
+        }
+
+        .network-password.visible {
+            display: block;
+        }
+
+        .network-message {
+            display: none;
+            margin-top: 18px;
+            padding: 15px;
+            border: 1px solid rgba(101, 212, 110, 0.35);
+            border-radius: 12px;
+            color: #bff4c4;
+            background: rgba(101, 212, 110, 0.08);
+            line-height: 1.5;
+        }
+
+        .network-message.visible {
+            display: block;
+        }
+
+        .choice-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+        }
+
+        .choice {
+            padding: 22px;
+            text-align: left;
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 15px;
+            background: var(--panel-light);
+            cursor: pointer;
+            transition:
+                border-color 150ms ease,
+                transform 150ms ease,
+                background 150ms ease;
+        }
+
+        .choice:hover {
+            transform: translateY(-2px);
+            border-color: var(--accent-dark);
+        }
+
+        .choice.selected {
+            border-color: var(--accent);
+            background: rgba(101, 212, 110, 0.09);
+            box-shadow: inset 0 0 0 1px var(--accent);
+        }
+
+        .choice strong {
+            display: block;
+            margin-bottom: 7px;
+            font-size: 17px;
+        }
+
+        .choice span {
+            color: var(--muted);
+            line-height: 1.45;
+        }
+
+        .field {
+            margin-bottom: 23px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 9px;
+            color: #dbe2eb;
+            font-size: 14px;
+            font-weight: 700;
+        }
+
+        input,
+        select {
+            width: 100%;
+            min-height: 50px;
+            padding: 0 15px;
+            color: var(--text);
+            border: 1px solid var(--border);
+            border-radius: 11px;
+            outline: none;
+            background: #0c1118;
+        }
+
+        input:focus,
+        select:focus {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(101, 212, 110, 0.12);
+        }
+
+        .range-row {
+            display: grid;
+            grid-template-columns: 1fr 110px;
+            align-items: center;
+            gap: 16px;
+        }
+
+        input[type="range"] {
+            padding: 0;
+            accent-color: var(--accent);
+        }
+
+        .ram-value {
+            min-height: 50px;
+            display: grid;
+            place-items: center;
+            border: 1px solid var(--border);
+            border-radius: 11px;
+            background: #0c1118;
+            font-weight: 800;
+        }
+
+        .summary {
+            overflow: hidden;
+            border: 1px solid var(--border);
+            border-radius: 15px;
+        }
+
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 20px;
+            padding: 15px 17px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .summary-row:last-child {
+            border-bottom: 0;
+        }
+
+        .summary-row span {
+            color: var(--muted);
+        }
+
+        .summary-row strong {
+            text-align: right;
+        }
+
+        .notice {
+            display: none;
+            margin-top: 18px;
+            padding: 15px;
+            border: 1px solid rgba(255, 202, 98, 0.35);
+            border-radius: 12px;
+            color: #ffe1a6;
+            background: rgba(255, 202, 98, 0.08);
+            line-height: 1.5;
+        }
+
+        .notice.visible {
+            display: block;
+        }
+
+        .error {
+            display: none;
+            margin-top: 18px;
+            padding: 14px;
+            color: #ffc2c2;
+            border: 1px solid rgba(255, 107, 107, 0.38);
+            border-radius: 11px;
+            background: rgba(255, 107, 107, 0.08);
+        }
+
+        .error.visible {
+            display: block;
+        }
+
+        .actions {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            margin-top: 35px;
+        }
+
+        .actions-right {
+            display: flex;
+            gap: 12px;
+            margin-left: auto;
+        }
+
+        .button {
+            min-height: 46px;
+            padding: 0 20px;
+            border: 0;
+            border-radius: 11px;
+            font-weight: 800;
+            cursor: pointer;
+        }
+
+        .button:disabled {
+            opacity: 0.55;
+            cursor: wait;
+        }
+
+        .button-primary {
+            color: #071008;
+            background: var(--accent);
+        }
+
+        .button-primary:hover:not(:disabled) {
+            background: #7be183;
+        }
+
+        .button-secondary {
+            color: var(--text);
+            border: 1px solid var(--border);
+            background: var(--panel-light);
+        }
+
+        .button-link {
+            color: var(--muted);
+            background: transparent;
+        }
+
+        .loader {
+            width: 52px;
+            height: 52px;
+            margin: 30px auto;
+            border: 5px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 850ms linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .center {
+            text-align: center;
+        }
+
+        .success-mark {
+            width: 74px;
+            height: 74px;
+            display: grid;
+            place-items: center;
+            margin: 28px auto;
+            color: #071008;
+            border-radius: 50%;
+            background: var(--accent);
+            font-size: 36px;
+            font-weight: 900;
+        }
+
+        @media (max-width: 640px) {
+            body {
+                padding: 12px;
+            }
+
+            .content {
+                min-height: 520px;
+                padding: 28px 22px;
+            }
+
+            .choice-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .range-row {
+                grid-template-columns: 1fr 88px;
+            }
+
+            .actions {
+                align-items: stretch;
+                flex-direction: column;
+            }
+
+            .actions-right {
+                width: 100%;
+                margin: 0;
+            }
+
+            .actions-right .button,
+            .actions > .button {
+                flex: 1;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <main class="shell">
+        <header class="brand">
+            <div class="logo">M</div>
+            <h1 class="brand-name">MineBox</h1>
+        </header>
+
+        <section class="card">
+            <div class="progress">
+                <div class="progress-bar" id="progress-bar"></div>
+            </div>
+
+            <div class="content">
+                <section class="step active" data-step="0">
+                    <div class="step-label">Network</div>
+                    <h2>Connect MineBox to your network</h2>
+
+                    <p class="description">
+                        Connect MineBox to Ethernet or choose your home Wi-Fi.
+                        This allows MineBox to download Minecraft and remain
+                        available from other devices on your network.
+                    </p>
+
+                    <div class="network-status" id="network-status">
+                        <div class="network-status-icon" id="network-status-icon">
+                            …
+                        </div>
+
+                        <div class="network-status-text">
+                            <strong id="network-status-title">
+                                Checking network connection
+                            </strong>
+
+                            <span id="network-status-description">
+                                MineBox is checking Ethernet and Wi-Fi status.
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="wifi-list" id="setup-wifi-list"></div>
+
+                    <div class="field network-password" id="network-password-field">
+                        <label for="network-password">Wi-Fi password</label>
+
+                        <input
+                            id="network-password"
+                            type="password"
+                            maxlength="128"
+                            autocomplete="current-password"
+                            placeholder="Enter the Wi-Fi password"
+                        >
+                    </div>
+
+                    <div class="network-message" id="network-message"></div>
+                    <div class="error" id="network-error"></div>
+
+                    <div class="actions">
+                        <button
+                            type="button"
+                            class="button button-secondary"
+                            id="refresh-networks"
+                        >
+                            Scan Again
+                        </button>
+
+                        <div class="actions-right">
+                            <button
+                                type="button"
+                                class="button button-link"
+                                id="skip-network"
+                            >
+                                Skip for now
+                            </button>
+
+                            <button
+                                type="button"
+                                class="button button-primary"
+                                id="network-next"
+                            >
+                                Continue
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="step" data-step="1">
+                    <div class="step-label">Welcome</div>
+                    <h2>Set up your MineBox</h2>
+
+                    <p class="description">
+                        MineBox will guide you through creating a dedicated
+                        Minecraft server. You can change additional settings
+                        later from the dashboard.
+                    </p>
+
+                    <div class="choice-grid">
+                        <button
+                            type="button"
+                            class="choice selected"
+                            id="create-choice"
+                        >
+                            <strong>Create a new server</strong>
+                            <span>
+                                Download a Minecraft server and configure it
+                                automatically.
+                            </span>
+                        </button>
+
+                        <button
+                            type="button"
+                            class="choice"
+                            id="existing-choice"
+                        >
+                            <strong>Use existing server</strong>
+                            <span>
+                                Continue with a server that is already installed
+                                on this MineBox.
+                            </span>
+                        </button>
+                    </div>
+
+                    <div class="notice" id="existing-notice">
+                        A Minecraft server was found at
+                        <strong>/opt/minecraft</strong>. You can accept it
+                        without downloading it again.
+                    </div>
+
+                    <div class="error" id="step-one-error"></div>
+
+                    <div class="actions">
+                        <div></div>
+
+                        <div class="actions-right">
+                            <button
+                                type="button"
+                                class="button button-primary"
+                                id="welcome-next"
+                            >
+                                Continue
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="step" data-step="2">
+                    <div class="step-label">Server software</div>
+                    <h2>Choose a Minecraft version</h2>
+
+                    <p class="description">
+                        The list below comes directly from Minecraft's official
+                        version information.
+                    </p>
+
+                    <div class="field">
+                        <label for="version">Minecraft version</label>
+
+                        <select id="version">
+                            <option value="">Loading versions...</option>
+                        </select>
+                    </div>
+
+                    <div class="field">
+                        <label for="server-type">Server type</label>
+
+                        <select id="server-type">
+                            <option value="vanilla">Vanilla</option>
+                        </select>
+                    </div>
+
+                    <div class="notice visible">
+                        Paper, Fabric, Forge, and other server types will be
+                        added after the Vanilla setup flow is complete.
+                    </div>
+
+                    <div class="error" id="version-error"></div>
+
+                    <div class="actions">
+                        <button
+                            type="button"
+                            class="button button-secondary back-button"
+                        >
+                            Back
+                        </button>
+
+                        <div class="actions-right">
+                            <button
+                                type="button"
+                                class="button button-primary"
+                                id="version-next"
+                            >
+                                Continue
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="step" data-step="3">
+                    <div class="step-label">Server settings</div>
+                    <h2>Name and size your server</h2>
+
+                    <p class="description">
+                        Choose how the server will appear and how much memory
+                        Minecraft may use.
+                    </p>
+
+                    <div class="field">
+                        <label for="server-name">Server name</label>
+
+                        <input
+                            id="server-name"
+                            type="text"
+                            maxlength="100"
+                            value="My MineBox Server"
+                            autocomplete="off"
+                        >
+                    </div>
+
+                    <div class="field">
+                        <label for="memory">Maximum memory</label>
+
+                        <div class="range-row">
+                            <input
+                                id="memory"
+                                type="range"
+                                min="1"
+                                max="16"
+                                step="1"
+                                value="4"
+                            >
+
+                            <div class="ram-value">
+                                <span id="memory-value">4 GB</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="error" id="settings-error"></div>
+
+                    <div class="actions">
+                        <button
+                            type="button"
+                            class="button button-secondary back-button"
+                        >
+                            Back
+                        </button>
+
+                        <div class="actions-right">
+                            <button
+                                type="button"
+                                class="button button-primary"
+                                id="settings-next"
+                            >
+                                Review
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="step" data-step="4">
+                    <div class="step-label">Review</div>
+                    <h2>Ready to create your server</h2>
+
+                    <p class="description">
+                        Check these settings before MineBox downloads and
+                        installs the server.
+                    </p>
+
+                    <div class="summary">
+                        <div class="summary-row">
+                            <span>Server type</span>
+                            <strong>Vanilla</strong>
+                        </div>
+
+                        <div class="summary-row">
+                            <span>Minecraft version</span>
+                            <strong id="summary-version">—</strong>
+                        </div>
+
+                        <div class="summary-row">
+                            <span>Server name</span>
+                            <strong id="summary-name">—</strong>
+                        </div>
+
+                        <div class="summary-row">
+                            <span>Maximum memory</span>
+                            <strong id="summary-memory">—</strong>
+                        </div>
+                    </div>
+
+                    <div class="error" id="create-error"></div>
+
+                    <div class="actions">
+                        <button
+                            type="button"
+                            class="button button-secondary back-button"
+                        >
+                            Back
+                        </button>
+
+                        <div class="actions-right">
+                            <button
+                                type="button"
+                                class="button button-primary"
+                                id="create-server"
+                            >
+                                Create Server
+                            </button>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="step center" data-step="5">
+                    <div class="step-label">Installing</div>
+                    <h2>Building your MineBox server</h2>
+
+                    <p class="description" style="margin-inline: auto;">
+                        MineBox is downloading Minecraft and writing the server
+                        configuration. Do not close this page.
+                    </p>
+
+                    <div class="loader"></div>
+
+                    <strong id="install-message">
+                        Downloading Minecraft server...
+                    </strong>
+                </section>
+
+                <section class="step center" data-step="6">
+                    <div class="step-label">Complete</div>
+                    <h2>Your server is ready</h2>
+
+                    <div class="success-mark">✓</div>
+
+                    <p class="description" style="margin-inline: auto;">
+                        MineBox finished configuring the Minecraft server.
+                        You can now manage it from the dashboard.
+                    </p>
+
+                    <button
+                        type="button"
+                        class="button button-primary"
+                        id="open-dashboard"
+                    >
+                        Open Dashboard
+                    </button>
+                </section>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const steps = [...document.querySelectorAll(".step")];
+        const progressBar = document.getElementById("progress-bar");
+
+        const networkNext = document.getElementById("network-next");
+        const skipNetwork = document.getElementById("skip-network");
+        const refreshNetworks = document.getElementById("refresh-networks");
+        const networkPassword = document.getElementById("network-password");
+        const networkPasswordField =
+            document.getElementById("network-password-field");
+        const setupWifiList = document.getElementById("setup-wifi-list");
+
+        const createChoice = document.getElementById("create-choice");
+        const existingChoice = document.getElementById("existing-choice");
+        const existingNotice = document.getElementById("existing-notice");
+
+        const versionSelect = document.getElementById("version");
+        const serverNameInput = document.getElementById("server-name");
+        const memoryInput = document.getElementById("memory");
+        const memoryValue = document.getElementById("memory-value");
+
+        let currentStep = 0;
+        let setupMode = "create";
+        let serverExists = false;
+        let selectedWifiNetwork = null;
+        let currentNetworkReady = false;
+
+        function showStep(stepNumber) {
+            currentStep = stepNumber;
+
+            for (const step of steps) {
+                step.classList.toggle(
+                    "active",
+                    Number(step.dataset.step) === stepNumber
+                );
+            }
+
+            const visibleProgressStep = Math.min(
+                Math.max(stepNumber, 0),
+                4
+            );
+
+            progressBar.style.width =
+                `${(visibleProgressStep + 1) * 20}%`;
+        }
+
+        function showError(elementId, message) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.classList.add("visible");
+        }
+
+        function clearError(elementId) {
+            const element = document.getElementById(elementId);
+            element.textContent = "";
+            element.classList.remove("visible");
+        }
+
+        function selectMode(mode) {
+            setupMode = mode;
+
+            createChoice.classList.toggle(
+                "selected",
+                mode === "create"
+            );
+
+            existingChoice.classList.toggle(
+                "selected",
+                mode === "existing"
+            );
+        }
+
+        async function readResponse(response) {
+            let data = {};
+
+            try {
+                data = await response.json();
+            } catch {
+                data = {};
+            }
+
+            if (!response.ok) {
+                let message = data.detail || "The request failed.";
+
+                if (typeof message === "object") {
+                    message = JSON.stringify(message);
+                }
+
+                throw new Error(message);
+            }
+
+            return data;
+        }
+
+
+        function updateNetworkStatus(network) {
+            const icon = document.getElementById("network-status-icon");
+            const title = document.getElementById("network-status-title");
+            const description = document.getElementById("network-status-description");
+
+            if (!network) {
+                icon.textContent = "?";
+                title.textContent = "Unable to determine network status";
+                description.textContent =
+                    "MineBox could not read the current network information.";
+                return;
+            }
+
+            if (
+                network.connected &&
+                network.connection_type === "ethernet"
+            ) {
+                icon.textContent = "✓";
+                title.textContent = "Ethernet connected";
+                description.textContent =
+                    `Connected through ${network.interface || "Ethernet"}` +
+                    (network.ip_address ? ` at ${network.ip_address}.` : ".") +
+                    " You can continue.";
+                return;
+            }
+
+            if (
+                network.connected &&
+                network.connection_type === "wifi"
+            ) {
+                icon.textContent = "✓";
+                title.textContent = network.ssid
+                    ? `Connected to ${network.ssid}`
+                    : "Wi-Fi connected";
+                description.textContent =
+                    "MineBox is already connected to Wi-Fi. You can continue.";
+                return;
+            }
+
+            if (network.hotspot_active) {
+                icon.textContent = "📶";
+                title.textContent = "Setup hotspot active";
+                description.textContent =
+                    "Choose your home Wi-Fi below. The hotspot will automatically turn off after connecting.";
+                return;
+            }
+
+            icon.textContent = "!";
+            title.textContent = "No network connection";
+            description.textContent =
+                "Connect an Ethernet cable or choose a Wi-Fi network below.";
+        }
+
+        function networkIsReady(network) {
+            return Boolean(network?.connected);
+        }
+
+        async function loadNetworkStatus() {
+            try {
+                const response = await fetch("/api/v1/network/status");
+                const data = await readResponse(response);
+
+                currentNetworkReady = networkIsReady(data.network);
+                updateNetworkStatus(data.network);
+
+                if (
+                    currentNetworkReady &&
+                    localStorage.getItem(
+                        "mineboxNetworkSetupPending"
+                    ) === "yes"
+                ) {
+                    localStorage.removeItem(
+                        "mineboxNetworkSetupPending"
+                    );
+                    showStep(1);
+                }
+
+                return data.network;
+            } catch (error) {
+                currentNetworkReady = false;
+                updateNetworkStatus(null);
+                return null;
+            }
+        }
+
+        function wifiUsesPassword(network) {
+            const security = String(
+                network?.security || ""
+            ).trim().toLowerCase();
+
+            return ![
+                "",
+                "--",
+                "none",
+                "open"
+            ].includes(security);
+        }
+
+        function selectWifiNetwork(network, button) {
+            selectedWifiNetwork = network;
+
+            for (
+                const item of
+                setupWifiList.querySelectorAll(".wifi-network")
+            ) {
+                item.classList.remove("selected");
+            }
+
+            button.classList.add("selected");
+
+            const needsPassword =
+                wifiUsesPassword(network) &&
+                !network.connected;
+
+            networkPasswordField.classList.toggle(
+                "visible",
+                needsPassword
+            );
+
+            networkPassword.value = "";
+
+            if (needsPassword) {
+                networkPassword.focus();
+            }
+
+            clearError("network-error");
+        }
+
+        function renderWifiNetworks(networks) {
+            setupWifiList.innerHTML = "";
+            selectedWifiNetwork = null;
+            networkPasswordField.classList.remove("visible");
+
+            if (!networks.length) {
+                const empty = document.createElement("p");
+                empty.className = "description";
+                empty.textContent =
+                    "No nearby Wi-Fi networks were found.";
+                setupWifiList.appendChild(empty);
+                return;
+            }
+
+            for (const network of networks) {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.className = "wifi-network";
+
+                const details = document.createElement("span");
+                details.className = "wifi-details";
+
+                const name = document.createElement("strong");
+                name.textContent =
+                    network.ssid || "Hidden network";
+
+                const security = document.createElement("span");
+
+                if (network.connected) {
+                    security.textContent = "Currently connected";
+                } else if (wifiUsesPassword(network)) {
+                    security.textContent =
+                        network.security || "Secured network";
+                } else {
+                    security.textContent = "Open network";
+                }
+
+                const signal = document.createElement("span");
+                signal.className = "wifi-signal";
+
+                const signalValue = Number(network.signal);
+
+                signal.textContent = Number.isFinite(signalValue)
+                    ? `${signalValue}%`
+                    : "Signal unknown";
+
+                details.append(name, security);
+                button.append(details, signal);
+
+                button.addEventListener(
+                    "click",
+                    () => selectWifiNetwork(network, button)
+                );
+
+                setupWifiList.appendChild(button);
+
+                if (network.connected) {
+                    selectWifiNetwork(network, button);
+                }
+            }
+        }
+
+        async function loadWifiNetworks(rescan = true) {
+            clearError("network-error");
+
+            refreshNetworks.disabled = true;
+            refreshNetworks.textContent = "Scanning...";
+
+            try {
+                const response = await fetch(
+                    `/api/v1/network/wifi?rescan=${rescan}`
+                );
+
+                const data = await readResponse(response);
+                renderWifiNetworks(data.networks || []);
+            } catch (error) {
+                setupWifiList.innerHTML = "";
+
+                showError(
+                    "network-error",
+                    `Could not scan for Wi-Fi: ${error.message}`
+                );
+            } finally {
+                refreshNetworks.disabled = false;
+                refreshNetworks.textContent = "Scan Again";
+            }
+        }
+
+        async function continueFromNetworkStep() {
+            clearError("network-error");
+
+            if (!selectedWifiNetwork) {
+                if (currentNetworkReady) {
+                    showStep(1);
+                    return;
+                }
+
+                showError(
+                    "network-error",
+                    "Select a Wi-Fi network, connect Ethernet, " +
+                    "or choose Skip for now."
+                );
+                return;
+            }
+
+            if (selectedWifiNetwork.connected) {
+                showStep(1);
+                return;
+            }
+
+            const password = networkPassword.value;
+
+            if (
+                wifiUsesPassword(selectedWifiNetwork) &&
+                !(
+                    password.length >= 8 &&
+                    password.length <= 63
+                ) &&
+                !/^[0-9a-fA-F]{64}$/.test(password)
+            ) {
+                showError(
+                    "network-error",
+                    "Enter the Wi-Fi password. It normally contains " +
+                    "between 8 and 63 characters."
+                );
+                networkPassword.focus();
+                return;
+            }
+
+            networkNext.disabled = true;
+            refreshNetworks.disabled = true;
+
+            const message =
+                document.getElementById("network-message");
+
+            message.textContent =
+                `Connecting to ${selectedWifiNetwork.ssid}. ` +
+                "Your browser may briefly disconnect while MineBox " +
+                "switches networks.";
+
+            message.classList.add("visible");
+
+            localStorage.setItem(
+                "mineboxNetworkSetupPending",
+                "yes"
+            );
+
+            try {
+                const response = await fetch(
+                    "/api/v1/network/connect",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            ssid: selectedWifiNetwork.ssid,
+                            password: password || null,
+                            hidden: false
+                        })
+                    }
+                );
+
+                const data = await readResponse(response);
+
+                localStorage.removeItem(
+                    "mineboxNetworkSetupPending"
+                );
+
+                currentNetworkReady = true;
+                updateNetworkStatus(data.network);
+
+                message.textContent =
+                    data.message ||
+                    `Connected to ${selectedWifiNetwork.ssid}.`;
+
+                setTimeout(
+                    () => showStep(1),
+                    900
+                );
+            } catch (error) {
+                if (error instanceof TypeError) {
+                    message.textContent =
+                        "MineBox may now be switching networks. " +
+                        "Reconnect this device to your home network, " +
+                        "then reopen minebox.local:8000/setup.";
+                    return;
+                }
+
+                localStorage.removeItem(
+                    "mineboxNetworkSetupPending"
+                );
+
+                message.classList.remove("visible");
+
+                showError(
+                    "network-error",
+                    error.message
+                );
+
+                networkNext.disabled = false;
+                refreshNetworks.disabled = false;
+            }
+        }
+
+        async function loadSetupStatus() {
+            try {
+                const response = await fetch("/api/v1/setup/status");
+                const data = await readResponse(response);
+
+                serverExists = Boolean(data.server_exists);
+
+                if (serverExists) {
+                    existingNotice.classList.add("visible");
+                } else {
+                    existingChoice.disabled = true;
+                    existingChoice.style.opacity = "0.5";
+                }
+            } catch (error) {
+                showError(
+                    "step-one-error",
+                    `Could not check MineBox status: ${error.message}`
+                );
+            }
+        }
+
+        async function loadVersions() {
+            clearError("version-error");
+
+            try {
+                const response = await fetch("/api/v1/setup/versions");
+                const data = await readResponse(response);
+
+                versionSelect.innerHTML = "";
+
+                for (const version of data.versions) {
+                    const option = document.createElement("option");
+                    option.value = version.id;
+                    option.textContent = version.id;
+                    versionSelect.appendChild(option);
+                }
+
+                if (!data.versions.length) {
+                    throw new Error("No Minecraft releases were returned.");
+                }
+            } catch (error) {
+                versionSelect.innerHTML =
+                    '<option value="">Versions unavailable</option>';
+
+                showError(
+                    "version-error",
+                    `Could not load Minecraft versions: ${error.message}`
+                );
+            }
+        }
+
+        async function acceptExistingServer() {
+            clearError("step-one-error");
+
+            try {
+                const response = await fetch(
+                    "/api/v1/setup/complete",
+                    {
+                        method: "POST"
+                    }
+                );
+
+                await readResponse(response);
+                showStep(6);
+            } catch (error) {
+                showError(
+                    "step-one-error",
+                    error.message
+                );
+            }
+        }
+
+        async function createServer() {
+            clearError("create-error");
+
+            const button = document.getElementById("create-server");
+            button.disabled = true;
+
+            showStep(5);
+
+            try {
+                const response = await fetch(
+                    "/api/v1/setup/create",
+                    {
+                        method: "POST",
+                        headers: {
+                            "Content-Type": "application/json"
+                        },
+                        body: JSON.stringify({
+                            server_name: serverNameInput.value.trim(),
+                            memory_gb: Number(memoryInput.value),
+                            version: versionSelect.value,
+                            overwrite: false
+                        })
+                    }
+                );
+
+                await readResponse(response);
+
+                document.getElementById("install-message").textContent =
+                    "Minecraft server installed successfully.";
+
+                setTimeout(() => showStep(6), 650);
+            } catch (error) {
+                showStep(4);
+                button.disabled = false;
+
+                showError(
+                    "create-error",
+                    error.message || "The Minecraft server could not be installed. Check the dashboard terminal for details."
+                );
+            }
+        }
+
+        networkNext.addEventListener(
+            "click",
+            continueFromNetworkStep
+        );
+
+        refreshNetworks.addEventListener(
+            "click",
+            () => loadWifiNetworks(true)
+        );
+
+        skipNetwork.addEventListener(
+            "click",
+            () => showStep(1)
+        );
+
+        createChoice.addEventListener(
+            "click",
+            () => selectMode("create")
+        );
+
+        existingChoice.addEventListener(
+            "click",
+            () => {
+                if (serverExists) {
+                    selectMode("existing");
+                }
+            }
+        );
+
+        document.getElementById("welcome-next").addEventListener(
+            "click",
+            async () => {
+                clearError("step-one-error");
+
+                if (setupMode === "existing") {
+                    await acceptExistingServer();
+                    return;
+                }
+
+                showStep(2);
+            }
+        );
+
+        document.getElementById("version-next").addEventListener(
+            "click",
+            () => {
+                clearError("version-error");
+
+                if (!versionSelect.value) {
+                    showError(
+                        "version-error",
+                        "Select a Minecraft version before continuing."
+                    );
+                    return;
+                }
+
+                showStep(3);
+            }
+        );
+
+        document.getElementById("settings-next").addEventListener(
+            "click",
+            () => {
+                clearError("settings-error");
+
+                const name = serverNameInput.value.trim();
+
+                if (!name) {
+                    showError(
+                        "settings-error",
+                        "Enter a name for the Minecraft server."
+                    );
+                    return;
+                }
+
+                document.getElementById("summary-version").textContent =
+                    versionSelect.value;
+
+                document.getElementById("summary-name").textContent =
+                    name;
+
+                document.getElementById("summary-memory").textContent =
+                    `${memoryInput.value} GB`;
+
+                showStep(4);
+            }
+        );
+
+        document.getElementById("create-server").addEventListener(
+            "click",
+            createServer
+        );
+
+        document.getElementById("open-dashboard").addEventListener(
+            "click",
+            () => {
+                window.location.href = "/";
+            }
+        );
+
+        for (const button of document.querySelectorAll(".back-button")) {
+            button.addEventListener(
+                "click",
+                () => showStep(Math.max(0, currentStep - 1))
+            );
+        }
+
+        memoryInput.addEventListener(
+            "input",
+            () => {
+                memoryValue.textContent = `${memoryInput.value} GB`;
+            }
+        );
+
+        loadSetupStatus();
+        loadVersions();
+        loadNetworkStatus();
+        loadWifiNetworks(true);
+    </script>
+</body>
+</html>
