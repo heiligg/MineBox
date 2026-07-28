@@ -268,8 +268,18 @@
                     : "HTTP restored. Reload the dashboard.";
             }
             window.setTimeout(() => {
-                const scheme = enable ? "https" : "http";
-                window.location.href = `${scheme}://${window.location.host}/`;
+                // Hotspot clients often use :80 (captive). HTTPS always lives on :8080.
+                // Never bounce http://192.168.4.1 → https://192.168.4.1/ (port 443).
+                const hostname = window.location.hostname || "192.168.4.1";
+                if (enable) {
+                    window.location.href = `https://${hostname}:8080/`;
+                    return;
+                }
+                if (window.location.port === "80" || !window.location.port) {
+                    window.location.href = `http://${hostname}/`;
+                    return;
+                }
+                window.location.href = `http://${hostname}:8080/`;
             }, 1500);
         } catch (error) {
             if (tlsNote) {
