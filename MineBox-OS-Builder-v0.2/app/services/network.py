@@ -1227,7 +1227,7 @@ def start_hotspot(
         True,
         stdout=(
             f"MineBox hotspot {ssid} started. "
-            "Open http://192.168.4.1 after connecting."
+            "Open http://192.168.4.1 (or https://192.168.4.1:8080 if HTTPS is on)."
         ),
     )
 

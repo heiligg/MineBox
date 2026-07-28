@@ -19,6 +19,7 @@ systemctl enable hostapd.service
 systemctl enable dnsmasq.service
 systemctl enable nftables.service
 systemctl enable ssh.service
+systemctl enable minebox-captive.service >/dev/null 2>&1 || true
 
 # NetworkManager may still manage Ethernet or an additional Wi-Fi adapter, but
 # wlan0 belongs exclusively to systemd-networkd + hostapd. Any working default

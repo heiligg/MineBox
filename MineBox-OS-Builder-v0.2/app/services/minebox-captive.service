@@ -1,0 +1,17 @@
+[Unit]
+Description=MineBox hotspot captive portal (port 80)
+Documentation=http://192.168.4.1/
+After=network-online.target minebox-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/minebox/scripts/minebox_captive.py
+Restart=on-failure
+RestartSec=2
+# Port 80 requires privilege; keep the process minimal.
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target

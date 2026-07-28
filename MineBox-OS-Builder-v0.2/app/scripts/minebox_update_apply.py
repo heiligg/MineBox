@@ -313,6 +313,62 @@ def write_commit(path: Path, commit: str) -> None:
     path.write_text(commit + "\n", encoding="utf-8")
 
 
+def install_hotspot_helpers(target: Path, dev: bool) -> None:
+    """Install captive portal + refresh hostapd/dnsmasq defaults for setup Wi-Fi."""
+    if dev:
+        return
+
+    captive_script = target / "scripts" / "minebox_captive.py"
+    if captive_script.is_file():
+        run(["chmod", "0755", str(captive_script)])
+
+    captive_unit = target / "services" / "minebox-captive.service"
+    if captive_unit.is_file():
+        run(
+            [
+                "install",
+                "-m",
+                "0644",
+                str(captive_unit),
+                "/etc/systemd/system/minebox-captive.service",
+            ]
+        )
+
+    hostapd_src = target / "services" / "hotspot" / "hostapd.conf"
+    if hostapd_src.is_file():
+        run(["install", "-m", "0644", str(hostapd_src), "/etc/hostapd/hostapd.conf"])
+
+    dnsmasq_src = target / "services" / "hotspot" / "dnsmasq-minebox.conf"
+    if dnsmasq_src.is_file():
+        run(
+            [
+                "install",
+                "-m",
+                "0644",
+                str(dnsmasq_src),
+                "/etc/dnsmasq.d/minebox.conf",
+            ]
+        )
+
+    run(["systemctl", "daemon-reload"], timeout=60)
+    subprocess.run(
+        ["systemctl", "enable", "--now", "minebox-captive.service"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    # Reload AP/DHCP so captive DNS and hostapd tweaks take effect.
+    for unit in ("hostapd.service", "dnsmasq.service"):
+        subprocess.run(
+            ["systemctl", "try-restart", unit],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+
+
 def install_systemd_units(target: Path, dev: bool) -> None:
     """Refresh MineBox unit files from the installed app tree."""
     if dev:
@@ -322,6 +378,7 @@ def install_systemd_units(target: Path, dev: bool) -> None:
         "minebox-update.service",
         "minebox-maintenance.service",
         "minebox-maintenance.timer",
+        "minebox-captive.service",
     ]
     for name in units:
         source = target / "services" / name
@@ -791,6 +848,7 @@ def apply_update(dev: bool) -> int:
 
         install_systemd_units(target, dev)
         install_minecraft_permissions(target, dev)
+        install_hotspot_helpers(target, dev)
         restart_api(dev)
         health_url = os.environ.get(
             "MINEBOX_HEALTH_URL",
