@@ -165,6 +165,9 @@ class CaptiveHandler(BaseHTTPRequestHandler):
             "<p>Waiting for the dashboard…</p>"
             "<p><a href='/'>Retry</a></p>"
             f"{https_hint}{note}"
+            "<p>On MineBox-Setup use <code>http://192.168.4.1</code> "
+            "(or <code>http://minebox.setup</code>) — not "
+            "<code>minebox.local</code>.</p>"
             "<p>Wi-Fi password is usually <code>mineboxsetup</code> unless you changed it.</p>"
             "</body></html>"
         ).encode()

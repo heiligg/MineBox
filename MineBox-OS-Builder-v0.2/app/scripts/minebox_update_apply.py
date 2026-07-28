@@ -419,6 +419,17 @@ def install_hotspot_helpers(target: Path, dev: bool) -> None:
             os.chmod(dnsmasq_dst, 0o644)
             dnsmasq_needs_bounce = True
 
+    # Keep mDNS off SoftAP so hotspot clients are not pointed at the LAN IP.
+    avahi_script = target / "scripts" / "minebox_install_avahi.py"
+    if avahi_script.is_file():
+        subprocess.run(
+            ["/usr/bin/python3", str(avahi_script), "--port", "25565"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
     # Keep dnsmasq as Type=simple without Debian resolvconf hooks (those hang).
     dnsmasq_dropin_src = (
         target / "services" / "hotspot" / "dnsmasq-minebox.service.dropin"
