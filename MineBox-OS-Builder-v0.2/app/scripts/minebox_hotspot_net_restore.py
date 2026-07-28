@@ -37,15 +37,25 @@ def main() -> int:
         raw = SYSCTL_SRC.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
         Path("/etc/sysctl.d/90-minebox-router.conf").write_bytes(raw)
 
-    dropin = Path("/etc/systemd/system/dnsmasq.service.d")
-    dropin.mkdir(parents=True, exist_ok=True)
-    (dropin / "minebox.conf").write_text(
-        "[Service]\n"
-        "ExecStart=\n"
-        "ExecStart=/usr/sbin/dnsmasq -k "
-        "--conf-file=/etc/dnsmasq.conf "
-        "--conf-dir=/etc/dnsmasq.d,.dpkg-dist,.dpkg-old,.dpkg-new\n",
-        encoding="utf-8",
+    dropin_dir = Path("/etc/systemd/system/dnsmasq.service.d")
+    dropin_dir.mkdir(parents=True, exist_ok=True)
+    dropin_src = HOTSPOT / "dnsmasq-minebox.service.dropin"
+    dropin_body = (
+        dropin_src.read_text(encoding="utf-8")
+        if dropin_src.is_file()
+        else (
+            "[Service]\n"
+            "Type=simple\n"
+            "ExecStartPre=\n"
+            "ExecStartPost=\n"
+            "ExecStart=\n"
+            "ExecStart=/usr/sbin/dnsmasq -k "
+            "--conf-file=/etc/dnsmasq.conf "
+            "--conf-dir=/etc/dnsmasq.d,.dpkg-dist,.dpkg-old,.dpkg-new\n"
+        )
+    )
+    (dropin_dir / "minebox.conf").write_text(
+        dropin_body.replace("\r\n", "\n"), encoding="utf-8"
     )
 
     run(["sysctl", "-w", "net.ipv4.ip_forward=1"])
@@ -53,6 +63,7 @@ def main() -> int:
     run(["nft", "-f", "/etc/nftables.conf"])
     run(["systemctl", "enable", "--now", "nftables.service"])
     run(["systemctl", "daemon-reload"])
+    run(["systemctl", "reset-failed", "dnsmasq.service"])
     run(["systemctl", "restart", "dnsmasq.service"])
     run(["systemctl", "try-restart", "hostapd.service"])
     print("Hotspot NAT/DNS restore complete.")

@@ -387,21 +387,38 @@ def install_hotspot_helpers(target: Path, dev: bool) -> None:
             os.chmod(dnsmasq_dst, 0o644)
             restart_units.append("dnsmasq.service")
 
-    # Debian dnsmasq injects --local-service which can break some client resolvers.
+    # Keep dnsmasq as Type=simple without Debian resolvconf hooks (those hang).
+    dnsmasq_dropin_src = (
+        target / "services" / "hotspot" / "dnsmasq-minebox.service.dropin"
+    )
     dnsmasq_dropin_dir = Path("/etc/systemd/system/dnsmasq.service.d")
     dnsmasq_dropin_dir.mkdir(parents=True, exist_ok=True)
     dnsmasq_dropin = dnsmasq_dropin_dir / "minebox.conf"
-    dnsmasq_dropin_body = (
-        "[Service]\n"
-        "ExecStart=\n"
-        "ExecStart=/usr/sbin/dnsmasq -k "
-        "--conf-file=/etc/dnsmasq.conf "
-        "--conf-dir=/etc/dnsmasq.d,.dpkg-dist,.dpkg-old,.dpkg-new\n"
-    )
-    previous = _file_bytes(dnsmasq_dropin)
-    dnsmasq_dropin.write_text(dnsmasq_dropin_body, encoding="utf-8")
-    if previous != dnsmasq_dropin_body.encode("utf-8"):
-        if "dnsmasq.service" not in restart_units:
+    if dnsmasq_dropin_src.is_file():
+        raw = (
+            dnsmasq_dropin_src.read_bytes()
+            .replace(b"\r\n", b"\n")
+            .replace(b"\r", b"\n")
+        )
+        if _file_bytes(dnsmasq_dropin) != raw:
+            dnsmasq_dropin.write_bytes(raw)
+            os.chmod(dnsmasq_dropin, 0o644)
+            restart_units.append("dnsmasq.service")
+    elif dnsmasq_dropin.is_file():
+        # Older broken drop-ins without Type=/cleared hooks: replace with safe default.
+        safe = (
+            "[Service]\n"
+            "Type=simple\n"
+            "ExecStartPre=\n"
+            "ExecStartPost=\n"
+            "ExecStart=\n"
+            "ExecStart=/usr/sbin/dnsmasq -k "
+            "--conf-file=/etc/dnsmasq.conf "
+            "--conf-dir=/etc/dnsmasq.d,.dpkg-dist,.dpkg-old,.dpkg-new\n"
+        ).encode()
+        if _file_bytes(dnsmasq_dropin) != safe:
+            dnsmasq_dropin.write_bytes(safe)
+            os.chmod(dnsmasq_dropin, 0o644)
             restart_units.append("dnsmasq.service")
 
     # Hotspot internet sharing: NAT + forward. Without these, clients get

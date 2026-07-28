@@ -1,0 +1,7 @@
+[Service]
+Type=simple
+# Clear Debian helper hooks that hang under dual-radio / resolvconf.
+ExecStartPre=
+ExecStartPost=
+ExecStart=
+ExecStart=/usr/sbin/dnsmasq -k --conf-file=/etc/dnsmasq.conf --conf-dir=/etc/dnsmasq.d,.dpkg-dist,.dpkg-old,.dpkg-new
