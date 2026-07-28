@@ -380,17 +380,47 @@ def install_hotspot_helpers(target: Path, dev: bool) -> None:
     dnsmasq_src = target / "services" / "hotspot" / "dnsmasq-minebox.conf"
     dnsmasq_dst = Path("/etc/dnsmasq.d/minebox.conf")
     if dnsmasq_src.is_file():
-        if _file_bytes(dnsmasq_src) != _file_bytes(dnsmasq_dst):
-            run(
-                [
-                    "install",
-                    "-m",
-                    "0644",
-                    str(dnsmasq_src),
-                    str(dnsmasq_dst),
-                ]
-            )
+        raw = dnsmasq_src.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        if _file_bytes(dnsmasq_dst) != raw:
+            dnsmasq_dst.parent.mkdir(parents=True, exist_ok=True)
+            dnsmasq_dst.write_bytes(raw)
+            os.chmod(dnsmasq_dst, 0o644)
             restart_units.append("dnsmasq.service")
+
+    # Hotspot internet sharing: NAT + forward. Without these, clients get
+    # "No internet" / DNS failures even though the Pi itself is online.
+    nft_src = target / "services" / "hotspot" / "minebox-hotspot.nft"
+    nft_dst = Path("/etc/nftables.conf")
+    if nft_src.is_file():
+        raw = nft_src.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        if _file_bytes(nft_dst) != raw:
+            nft_dst.write_bytes(raw)
+            os.chmod(nft_dst, 0o644)
+        subprocess.run(
+            ["systemctl", "enable", "--now", "nftables.service"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        # Always reload so a flushed ruleset is restored on update.
+        subprocess.run(
+            ["nft", "-f", str(nft_dst)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    sysctl_src = target / "services" / "hotspot" / "90-minebox-router.conf"
+    sysctl_dst = Path("/etc/sysctl.d/90-minebox-router.conf")
+    if sysctl_src.is_file():
+        raw = sysctl_src.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        if _file_bytes(sysctl_dst) != raw:
+            sysctl_dst.parent.mkdir(parents=True, exist_ok=True)
+            sysctl_dst.write_bytes(raw)
+            os.chmod(sysctl_dst, 0o644)
+    Path("/proc/sys/net/ipv4/ip_forward").write_text("1", encoding="utf-8")
 
     run(["systemctl", "daemon-reload"], timeout=60)
     subprocess.run(
