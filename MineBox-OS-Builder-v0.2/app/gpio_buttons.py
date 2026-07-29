@@ -8,8 +8,8 @@ Until a rotary encoder ships:
   Hold Right  → KEY_ENTER  (Confirm / click)
 
 Pins (active-low, internal pull-up):
-  Left  BCM17 / physical pin 11
-  Right BCM23 / physical pin 16
+  Left  BCM23 / physical pin 16
+  Right BCM17 / physical pin 11
   GND          / physical pin 14
 """
 
@@ -23,8 +23,8 @@ from typing import Callable
 
 LOGGER = logging.getLogger("minebox.gpio_buttons")
 
-LEFT_GPIO = 17
-RIGHT_GPIO = 23
+LEFT_GPIO = 23
+RIGHT_GPIO = 17
 DEBOUNCE_S = 0.04
 HOLD_S = 0.45
 POLL_S = 0.005

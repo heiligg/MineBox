@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Live level monitor for MineBox button debugging.
 
-Left:  BCM17 = physical pin 11
-Right: BCM23 = physical pin 16 (GND on pin 14)
+Left:  BCM23 = physical pin 16
+Right: BCM17 = physical pin 11 (GND on pin 14)
 """
 
 from __future__ import annotations
@@ -13,9 +13,9 @@ from gpiozero import DigitalInputDevice
 
 # BCM -> physical pin on 40-pin header
 PINS = {
-    17: 11,  # left
-    23: 16,  # right (recommended)
-    27: 13,  # alternate right
+    23: 16,  # left
+    17: 11,  # right
+    27: 13,
     22: 15,
     24: 18,
     18: 12,
@@ -27,15 +27,14 @@ def main() -> int:
     last: dict[int, int] = {}
 
     print("MineBox GPIO live monitor")
-    print("  Left:  BCM17 = physical pin 11")
-    print("  Right: BCM23 = physical pin 16  (GND = pin 14)")
-    print("  Test: jumper pin 16 to pin 14 — BCM23 should flip")
+    print("  Left:  BCM23 = physical pin 16")
+    print("  Right: BCM17 = physical pin 11  (GND = pin 14)")
+    print("  Test: jumper pin 11 to pin 14 — BCM17 should flip (Right)")
     print("  Ctrl+C to exit")
     print()
 
     for bcm, phys in PINS.items():
         try:
-            # pull_up=True: open=inactive, short-to-GND=active
             dev = DigitalInputDevice(bcm, pull_up=True)
         except Exception as exc:  # noqa: BLE001
             print(f"  skip BCM{bcm} (pin {phys}): {exc}")
