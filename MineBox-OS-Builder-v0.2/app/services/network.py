@@ -1250,6 +1250,9 @@ def stop_hotspot() -> CommandResult:
         messages.append("NetworkManager hotspot stopped.")
 
     if _hostapd_hotspot_active():
+        # Dedicated SoftAP + dnsmasq are permanent setup infrastructure.
+        # Never stop dnsmasq here — that bricks DHCP for the next client.
+        # Stopping hostapd is allowed only as an explicit AP pause.
         stop_hostapd = run(
             [
                 "sudo",
@@ -1257,17 +1260,6 @@ def stop_hotspot() -> CommandResult:
                 "/usr/bin/systemctl",
                 "stop",
                 "hostapd.service",
-            ],
-            timeout=30,
-        )
-        # dnsmasq may also be tied to the setup hotspot.
-        run(
-            [
-                "sudo",
-                "-n",
-                "/usr/bin/systemctl",
-                "stop",
-                "dnsmasq.service",
             ],
             timeout=30,
         )
@@ -1280,7 +1272,7 @@ def stop_hotspot() -> CommandResult:
                 ),
                 returncode=stop_hostapd.returncode,
             )
-        messages.append("Setup hotspot stopped.")
+        messages.append("Setup hotspot radio paused (DHCP/DNS left running).")
 
     if not messages:
         return CommandResult(
