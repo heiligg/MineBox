@@ -170,10 +170,14 @@ class MineBoxApp:
                 elif line.startswith("WARNING:"): attr = self.color_warn
                 self.safe(row, 2, line, attr); row += 1
             self.footer(
-                "Hold R: Menu | Hold L: Exit | Menus: Tap L/R move, Hold R select"
+                "Tap R: Menu | Hold L: Exit | In menus: Tap L/R move, Hold R select"
             )
             self.screen.refresh(); key = self.get_key()
-            if self.is_select(key): self.set_input_timeout(-1); return "menu"
+            # Short L/R (encoder stand-in): enter the menu. Hold R is confirm
+            # only inside menus — do not open the menu on a long right press.
+            if key in (curses.KEY_UP, curses.KEY_DOWN):
+                self.set_input_timeout(-1)
+                return "menu"
             if self.is_quick(key):
                 self.set_input_timeout(-1); self.quick_actions(); self.set_input_timeout(int(self.settings.get("refresh_seconds", 2) * 1000))
             elif self.is_back(key):

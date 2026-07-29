@@ -21,9 +21,9 @@ The installer configures all required ownership, shared-group access, default AC
 
 ## Physical buttons (until encoder)
 
-- Short Left / Right: move like the encoder
+- Short Left / Right: move like the encoder (on the dashboard, a short press opens the menu)
 - Hold Left (~0.45s): Back / Exit
-- Hold Right (~0.45s): Confirm / Select / Open menu
+- Hold Right (~0.45s): Confirm / Select (inside menus only — not used to open the menu)
 
 Pins: Left BCM17 (pin 11), Right BCM23 (pin 16), GND pin 14.
 
