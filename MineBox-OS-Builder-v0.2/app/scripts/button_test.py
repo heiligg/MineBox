@@ -4,12 +4,16 @@
 Left:  BCM GPIO17 (active low, internal pull-up) — physical pin 11
 Right: BCM GPIO27 (active low, internal pull-up) — physical pin 13
 
-Wiring per button:
+Wiring per button (active-low):
   COM -> GND
   NO  -> that button's GPIO
-  Do NOT wire the switch to 3.3V or 5V when using pull_up=True.
+  Do NOT wire the switch to 3.3V or 5V.
 
-Use --scan to discover which GPIO actually moves when you press a button.
+If Right never fires:
+  1) python3 ~/button_test.py --scan
+  2) With the script running, briefly jumper physical pin 13 to any GND.
+     If that prints 'Right button pressed', the pin is fine and the switch/wiring is wrong.
+  3) Try: python3 ~/button_test.py --right-active-high
 """
 
 from __future__ import annotations
@@ -21,22 +25,24 @@ from gpiozero import Button
 
 LEFT_GPIO = 17
 RIGHT_GPIO = 27
-# Classic debounce: accept a new level only after it has been unchanged this long.
 DEBOUNCE_S = 0.04
-# Ignore new edges briefly after a completed click (kills release bounce).
 LOCKOUT_S = 0.25
 POLL_S = 0.002
-# Common header pins people wire by mistake (BCM numbers).
-SCAN_GPIOS = (17, 27, 22, 23, 24, 5, 6, 16, 26, 13, 19, 20, 21)
+SCAN_GPIOS = (17, 27, 22, 23, 24, 5, 6, 16, 26, 13, 19, 20, 21, 18, 12)
 
 
 class DebouncedButton:
     """Poll a gpiozero Button with classic edge debounce."""
 
-    def __init__(self, gpio: int, name: str) -> None:
+    def __init__(self, gpio: int, name: str, *, pull_up: bool) -> None:
         self.gpio = gpio
         self.name = name
-        self.button = Button(gpio, pull_up=True, bounce_time=None)
+        self.pull_up = pull_up
+        # active_state must be set when pull_up is False
+        kwargs = {"pull_up": pull_up, "bounce_time": None}
+        if not pull_up:
+            kwargs["active_state"] = True
+        self.button = Button(gpio, **kwargs)
         self.stable_pressed = bool(self.button.is_pressed)
         self.last_raw = self.stable_pressed
         self.last_change = time.monotonic()
@@ -67,13 +73,16 @@ class DebouncedButton:
         self.button.close()
 
 
-def run_test(left_gpio: int, right_gpio: int) -> int:
-    left = DebouncedButton(left_gpio, "Left")
-    right = DebouncedButton(right_gpio, "Right")
+def run_test(left_gpio: int, right_gpio: int, *, right_pull_up: bool) -> int:
+    left = DebouncedButton(left_gpio, "Left", pull_up=True)
+    right = DebouncedButton(right_gpio, "Right", pull_up=right_pull_up)
 
     print("MineBox dual button test")
-    print(f"  Left  BCM GPIO{left_gpio}  (pull_up, active low)  [phys pin 11 if GPIO17]")
-    print(f"  Right BCM GPIO{right_gpio}  (pull_up, active low)  [phys pin 13 if GPIO27]")
+    print(f"  Left  BCM GPIO{left_gpio}  pull_up=True   (phys pin 11 if GPIO17)")
+    print(
+        f"  Right BCM GPIO{right_gpio}  pull_up={right_pull_up}  "
+        f"(phys pin 13 if GPIO27)"
+    )
     print(f"  debounce={DEBOUNCE_S*1000:.0f}ms  lockout={LOCKOUT_S*1000:.0f}ms")
     print(
         "  Idle left:  "
@@ -83,7 +92,7 @@ def run_test(left_gpio: int, right_gpio: int) -> int:
         "  Idle right: "
         + ("PRESSED/shorted" if right.stable_pressed else "released (OK)")
     )
-    print("  Tip: if Right never prints, run:  python3 ~/button_test.py --scan")
+    print("  Hardware check: jumper pin 13 to GND — should print Right pressed.")
     print("  Ctrl+C to exit.")
     print()
 
@@ -101,17 +110,20 @@ def run_test(left_gpio: int, right_gpio: int) -> int:
         right.close()
 
 
-def run_scan(seconds: float = 20.0) -> int:
-    """Watch several GPIOs; print which one changes when you press a button."""
+def run_scan(seconds: float, *, pull_up: bool) -> int:
     buttons: dict[int, Button] = {}
     last: dict[int, bool] = {}
-    print("GPIO scan — press LEFT, then RIGHT, once each.")
+    mode = "pull-up/active-low" if pull_up else "pull-down/active-high"
+    print(f"GPIO scan ({mode}) — press LEFT, then RIGHT.")
     print(f"Watching BCM {', '.join(str(g) for g in SCAN_GPIOS)} for {seconds:.0f}s")
     print()
     try:
         for gpio in SCAN_GPIOS:
             try:
-                btn = Button(gpio, pull_up=True, bounce_time=None)
+                kwargs = {"pull_up": pull_up, "bounce_time": None}
+                if not pull_up:
+                    kwargs["active_state"] = True
+                btn = Button(gpio, **kwargs)
             except Exception as exc:  # noqa: BLE001
                 print(f"  skip GPIO{gpio}: {exc}")
                 continue
@@ -136,29 +148,38 @@ def run_scan(seconds: float = 20.0) -> int:
     finally:
         for btn in buttons.values():
             btn.close()
-    print("\nDone. Use the GPIO that flipped for that physical button.")
+    print("\nDone. Note which GPIO flipped for the Right button.")
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="MineBox dual button test")
+    parser.add_argument("--scan", action="store_true", help="Discover which GPIO moves")
     parser.add_argument(
-        "--scan",
+        "--scan-active-high",
         action="store_true",
-        help="Discover which GPIO moves when you press a button",
+        help="Scan assuming buttons short to 3.3V (pull-down)",
     )
-    parser.add_argument("--left", type=int, default=LEFT_GPIO, help="Left BCM GPIO")
-    parser.add_argument("--right", type=int, default=RIGHT_GPIO, help="Right BCM GPIO")
+    parser.add_argument("--left", type=int, default=LEFT_GPIO)
+    parser.add_argument("--right", type=int, default=RIGHT_GPIO)
     parser.add_argument(
-        "--scan-seconds",
-        type=float,
-        default=20.0,
-        help="How long --scan watches (default 20)",
+        "--right-active-high",
+        action="store_true",
+        help="Right button shorts to 3.3V instead of GND",
     )
+    parser.add_argument("--scan-seconds", type=float, default=30.0)
     args = parser.parse_args()
-    if args.scan:
-        return run_scan(seconds=max(5.0, args.scan_seconds))
-    return run_test(left_gpio=args.left, right_gpio=args.right)
+
+    if args.scan or args.scan_active_high:
+        return run_scan(
+            seconds=max(5.0, args.scan_seconds),
+            pull_up=not args.scan_active_high,
+        )
+    return run_test(
+        left_gpio=args.left,
+        right_gpio=args.right,
+        right_pull_up=not args.right_active_high,
+    )
 
 
 if __name__ == "__main__":
