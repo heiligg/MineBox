@@ -22,6 +22,55 @@ class MineBoxApp:
         except curses.error: pass
         self.screen.keypad(True)
         self._init_colors()
+        self._start_gpio_buttons()
+
+    def _start_gpio_buttons(self) -> None:
+        """Short L/R navigate; hold L=back; hold R=confirm (encoder stand-in)."""
+        self._input_timeout_ms = -1
+        try:
+            from gpio_buttons import start_buttons
+
+            self._gpio = start_buttons()
+        except Exception:
+            self._gpio = None
+
+    def set_input_timeout(self, ms: int) -> None:
+        self._input_timeout_ms = int(ms)
+        self.screen.timeout(self._input_timeout_ms)
+
+    def get_key(self) -> int:
+        """Keyboard getch, with physical-button events taking priority."""
+        try:
+            from gpio_buttons import pop_button_key
+        except Exception:
+            pop_button_key = None  # type: ignore[assignment]
+
+        timeout_ms = getattr(self, "_input_timeout_ms", -1)
+        slice_ms = 50
+        end = None if timeout_ms < 0 else (time.monotonic() + (timeout_ms / 1000.0))
+
+        while True:
+            if pop_button_key is not None:
+                try:
+                    key = pop_button_key()
+                except Exception:
+                    key = None
+                if key is not None:
+                    return int(key)
+
+            if end is None:
+                self.screen.timeout(slice_ms)
+            else:
+                remaining_ms = int((end - time.monotonic()) * 1000)
+                if remaining_ms <= 0:
+                    return -1
+                self.screen.timeout(min(slice_ms, max(1, remaining_ms)))
+
+            key = self.screen.getch()
+            if key != -1:
+                return key
+            if end is not None and time.monotonic() >= end:
+                return -1
 
     def _init_colors(self) -> None:
         self.color_title = curses.A_BOLD
@@ -85,14 +134,14 @@ class MineBoxApp:
             ("Stop Server", self.stop_server),
             ("System Status", self.system_info),
             ("Return", None),
-        ], "Rotate: Move | Press: Select | Left: Back")
+        ], "Tap L/R: Move | Hold R: Select | Hold L: Back")
 
     def run(self) -> None:
         while self.running:
             if self.dashboard() == "menu": self.main_menu()
 
     def dashboard(self) -> str:
-        self.screen.timeout(int(self.settings.get("refresh_seconds", 2) * 1000))
+        self.set_input_timeout(int(self.settings.get("refresh_seconds", 2) * 1000))
         while self.running:
             s = get_system_status(); online = minecraft.is_running(); monitoring.sample(); row = self.title("MineBox OS")
             temp = str(s["temperature"])
@@ -120,24 +169,26 @@ class MineBoxApp:
                 if line.startswith("Minecraft:"): attr = self.color_ok if online else self.color_bad
                 elif line.startswith("WARNING:"): attr = self.color_warn
                 self.safe(row, 2, line, attr); row += 1
-            self.footer("Left: Exit UI | Press: Menu | Right: Quick Actions")
-            self.screen.refresh(); key = self.screen.getch()
-            if self.is_select(key): self.screen.timeout(-1); return "menu"
+            self.footer(
+                "Hold R: Menu | Hold L: Exit | Menus: Tap L/R move, Hold R select"
+            )
+            self.screen.refresh(); key = self.get_key()
+            if self.is_select(key): self.set_input_timeout(-1); return "menu"
             if self.is_quick(key):
-                self.screen.timeout(-1); self.quick_actions(); self.screen.timeout(int(self.settings.get("refresh_seconds", 2) * 1000))
+                self.set_input_timeout(-1); self.quick_actions(); self.set_input_timeout(int(self.settings.get("refresh_seconds", 2) * 1000))
             elif self.is_back(key):
                 if self.confirm("Exit MineBox UI?", ["Minecraft will keep running."], "Exit UI"):
                     self.running = False; return "exit"
-                self.screen.timeout(int(self.settings.get("refresh_seconds", 2) * 1000))
+                self.set_input_timeout(int(self.settings.get("refresh_seconds", 2) * 1000))
         return "exit"
 
-    def menu(self, title: str, items: list[tuple[str, Action]], footer: str = "Rotate: Move | Press: Select | Left: Back | Right: Quick") -> None:
-        selected = 0; self.screen.timeout(-1)
+    def menu(self, title: str, items: list[tuple[str, Action]], footer: str = "Tap L/R: Move | Hold R: Select | Hold L: Back") -> None:
+        selected = 0; self.set_input_timeout(-1)
         while self.running:
             row = self.title(title)
             for i, (label, _) in enumerate(items):
                 self.safe(row, 2, ("> " if i == selected else "  ") + label, self.color_selected if i == selected else 0); row += 1
-            self.footer(footer); self.screen.refresh(); key = self.screen.getch()
+            self.footer(footer); self.screen.refresh(); key = self.get_key()
             if key == curses.KEY_UP: selected = (selected-1) % len(items)
             elif key == curses.KEY_DOWN: selected = (selected+1) % len(items)
             elif self.is_select(key):
@@ -147,13 +198,13 @@ class MineBoxApp:
             elif self.is_quick(key) and title != "Quick Actions": self.quick_actions()
             elif self.is_back(key): return
 
-    def choose_option(self, title: str, labels: list[str], footer: str = "Rotate: Move | Press: Select | Left: Back") -> int | None:
-        selected = 0; self.screen.timeout(-1)
+    def choose_option(self, title: str, labels: list[str], footer: str = "Tap L/R: Move | Hold R: Select | Hold L: Back") -> int | None:
+        selected = 0; self.set_input_timeout(-1)
         while self.running:
             row = self.title(title)
             for i, label in enumerate(labels):
                 self.safe(row, 2, ("> " if i == selected else "  ") + label, self.color_selected if i == selected else 0); row += 1
-            self.footer(footer); self.screen.refresh(); key = self.screen.getch()
+            self.footer(footer); self.screen.refresh(); key = self.get_key()
             if key == curses.KEY_UP: selected = (selected - 1) % len(labels)
             elif key == curses.KEY_DOWN: selected = (selected + 1) % len(labels)
             elif self.is_select(key): return selected
@@ -167,7 +218,7 @@ class MineBoxApp:
             ("Performance", self.performance_screen), ("Log Browser", self.log_browser),
             ("MineBox Settings", self.minebox_settings_menu), ("Diagnostics", self.diagnostics_menu),
             ("System", self.system_menu), ("About MineBox", self.about), ("Exit MineBox UI", self.exit_ui)
-        ], "Rotate: Move | Press: Select | Left: Dashboard | Right: Quick")
+        ], "Tap L/R: Move | Hold R: Select | Hold L: Dashboard")
 
     def message(self, title: str, lines: list[str], wait: bool = True) -> None:
         row = self.title(title)
@@ -175,9 +226,9 @@ class MineBoxApp:
             for wrapped in self.wrap(line): self.safe(row, 2, wrapped); row += 1
         self.footer("Press/Left: Return" if wait else "Please wait..."); self.screen.refresh()
         if wait:
-            self.screen.timeout(-1)
+            self.set_input_timeout(-1)
             while True:
-                key = self.screen.getch()
+                key = self.get_key()
                 if self.is_select(key) or self.is_back(key): break
 
     def wrap(self, text: str) -> list[str]:
@@ -198,7 +249,7 @@ class MineBoxApp:
             for line in lines: self.safe(row, 2, line); row += 1
             row += 1
             for i, label in enumerate(["Cancel", yes]): self.safe(row+i, 2, ("> " if i==choice else "  ")+label, curses.A_REVERSE|curses.A_BOLD if i==choice else 0)
-            self.footer("Rotate: Choose | Press: Confirm | Left: Cancel"); self.screen.refresh(); key=self.screen.getch()
+            self.footer("Tap L/R: Choose | Hold R: Confirm | Hold L: Cancel"); self.screen.refresh(); key=self.get_key()
             if key in (curses.KEY_UP,curses.KEY_DOWN): choice=1-choice
             elif self.is_select(key): return choice==1
             elif self.is_back(key): return False
@@ -210,9 +261,9 @@ class MineBoxApp:
         value = initial
         try: curses.curs_set(1)
         except curses.error: pass
-        self.screen.timeout(-1)
+        self.set_input_timeout(-1)
         while True:
-            row=self.title(title); self.safe(row,2,prompt); self.safe(row+2,2,value+"_"); self.footer("Press: Save | Left: Cancel | Backspace: Delete"); self.screen.refresh(); key=self.screen.getch()
+            row=self.title(title); self.safe(row,2,prompt); self.safe(row+2,2,value+"_"); self.footer("Press: Save | Left: Cancel | Backspace: Delete"); self.screen.refresh(); key=self.get_key()
             if self.is_select(key):
                 try: curses.curs_set(0)
                 except curses.error: pass
@@ -241,18 +292,18 @@ class MineBoxApp:
         self.message("Server Information", [f"Status: {minecraft.status_text()}",f"Players: {minecraft.player_count_text()}",f"Version: {minecraft.version()}",f"Uptime: {minecraft.uptime()}",f"MOTD: {props.get('motd','Unknown') if not err else 'Unavailable'}",f"Game mode: {props.get('gamemode','Unknown')}",f"Difficulty: {props.get('difficulty','Unknown')}"])
 
     def live_console(self) -> None:
-        offset=0; self.screen.timeout(1000)
+        offset=0; self.set_input_timeout(1000)
         while self.running:
             h,_=self.screen.getmaxyx(); available=max(3,h-7); logs=minecraft.recent_logs(max(available+offset,available)); shown=logs[max(0,len(logs)-available-offset):len(logs)-offset if offset else None]
             row=self.title("Live Console")
             for line in shown[-available:]: self.safe(row,1,line); row+=1
-            self.footer("Rotate: Scroll | Left: Back | Right: Command"); self.screen.refresh(); key=self.screen.getch()
+            self.footer("Rotate: Scroll | Left: Back | Right: Command"); self.screen.refresh(); key=self.get_key()
             if key==curses.KEY_UP: offset=min(offset+1,max(0,len(logs)-available))
             elif key==curses.KEY_DOWN: offset=max(0,offset-1)
             elif self.is_quick(key):
                 command=self.text_input("RCON Command","Enter command without a leading slash:")
                 if command: self.result("RCON Result", rcon.send(command))
-            elif self.is_back(key): self.screen.timeout(-1); return
+            elif self.is_back(key): self.set_input_timeout(-1); return
 
     def players_menu(self) -> None:
         info=minecraft.player_info()
@@ -297,8 +348,8 @@ class MineBoxApp:
             if not choices: self.safe(row,2,"No backups found."); self.footer("Left: Back"); self.screen.refresh();
             else:
                 for i,b in enumerate(choices): self.safe(row+i,2,("> " if i==idx else "  ")+b.label,curses.A_REVERSE|curses.A_BOLD if i==idx else 0)
-                self.footer("Rotate: Move | Press: Select | Left: Back"); self.screen.refresh()
-            key=self.screen.getch()
+                self.footer("Tap L/R: Move | Hold R: Select | Hold L: Back"); self.screen.refresh()
+            key=self.get_key()
             if key==curses.KEY_UP and choices: idx=(idx-1)%len(choices)
             elif key==curses.KEY_DOWN and choices: idx=(idx+1)%len(choices)
             elif self.is_select(key) and choices: return choices[idx]
@@ -372,7 +423,7 @@ class MineBoxApp:
         self.settings['dashboard_quick_actions']=not bool(self.settings.get('dashboard_quick_actions',True)); settings_service.save(self.settings)
 
     def performance_screen(self):
-        self.screen.timeout(1000)
+        self.set_input_timeout(1000)
         while True:
             sample=monitoring.sample(); hist=monitoring.history(); row=self.title("Performance")
             self.safe(row,2,f"System CPU:       {sample.cpu:5.1f}%"); row+=1
@@ -381,20 +432,20 @@ class MineBoxApp:
             self.safe(row,2,"CPU history:    "+monitoring.sparkline([x.cpu for x in hist],30)); row+=1
             self.safe(row,2,"Memory history: "+monitoring.sparkline([x.memory for x in hist],30)); row+=1
             self.safe(row,2,"Each character is one recent sample.");
-            self.footer("Left: Back | Right: Reset History"); self.screen.refresh(); key=self.screen.getch()
-            if self.is_back(key): self.screen.timeout(-1); return
+            self.footer("Left: Back | Right: Reset History"); self.screen.refresh(); key=self.get_key()
+            if self.is_back(key): self.set_input_timeout(-1); return
             if self.is_quick(key):
                 monitoring._HISTORY.clear()
 
     def log_browser(self):
-        level='ALL'; query=''; offset=0; self.screen.timeout(1000)
+        level='ALL'; query=''; offset=0; self.set_input_timeout(1000)
         levels=['ALL','INFO','WARN','ERROR']
         while True:
             lines=log_tools.filter_lines(level,query,1000); h,_=self.screen.getmaxyx(); available=max(3,h-7)
             shown=lines[max(0,len(lines)-available-offset):len(lines)-offset if offset else None]
             row=self.title(f"Log Browser [{level}]" + (f" Search: {query}" if query else ""))
             for line in shown[-available:]: self.safe(row,1,line); row+=1
-            self.footer("Rotate: Scroll | Left: Back | Right: Log Actions"); self.screen.refresh(); key=self.screen.getch()
+            self.footer("Rotate: Scroll | Left: Back | Right: Log Actions"); self.screen.refresh(); key=self.get_key()
             if key==curses.KEY_UP: offset=min(offset+1,max(0,len(lines)-available))
             elif key==curses.KEY_DOWN: offset=max(0,offset-1)
             elif self.is_quick(key):
@@ -404,8 +455,8 @@ class MineBoxApp:
                     value=self.text_input("Search Logs","Text to find; blank clears:",query)
                     if value is not None: query=value; offset=0
                 elif action == 2: self.result("Export Logs",log_tools.export(lines,f"{level.lower()}-logs"))
-                self.screen.timeout(1000)
-            elif self.is_back(key): self.screen.timeout(-1); return
+                self.set_input_timeout(1000)
+            elif self.is_back(key): self.set_input_timeout(-1); return
 
     def configuration_check(self):
         rows=validation.checks(); lines=[f"{'PASS' if ok else 'FAIL'} - {name}: {detail}" for name,ok,detail in rows]
