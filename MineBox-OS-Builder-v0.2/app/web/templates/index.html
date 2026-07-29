@@ -3723,8 +3723,9 @@
         refreshStatus();
         refreshConsole();
 
-        setInterval(refreshStatus, 2000);
-        setInterval(refreshConsole, 1000);
+        // Forge 1.12 RCON dies if the dashboard opens sockets too often.
+        setInterval(refreshStatus, 10000);
+        setInterval(refreshConsole, 3000);
 
         backupNowButton.addEventListener(
             "click",

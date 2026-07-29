@@ -118,6 +118,6 @@ window.onload = () => {
     refreshStatus();
     refreshConsole();
 
-    setInterval(refreshStatus, 5000);
-    setInterval(refreshConsole, 2000);
+    setInterval(refreshStatus, 10000);
+    setInterval(refreshConsole, 3000);
 };

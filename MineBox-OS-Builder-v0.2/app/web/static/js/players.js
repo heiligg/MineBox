@@ -411,7 +411,7 @@
             return;
         }
         loadStatus();
-        window.setInterval(loadStatus, 10000);
+        window.setInterval(loadStatus, 20000);
     }
 
     if (document.readyState === "loading") {

@@ -19,8 +19,9 @@ SERVERDATA_RESPONSE_VALUE = 0
 _LOCK = threading.RLock()
 _COOLDOWN_UNTIL = 0.0
 _LIST_CACHE: tuple[float, CommandResult] | None = None
-_LIST_CACHE_TTL = 4.0
-_COOLDOWN_SECONDS = 20.0
+# Forge 1.12 RCON dies under connection storms; keep list polls very sparse.
+_LIST_CACHE_TTL = 15.0
+_COOLDOWN_SECONDS = 30.0
 
 
 def _packet(request_id: int, packet_type: int, body: str) -> bytes:
@@ -210,16 +211,26 @@ def send(command: str, timeout: float = 4.0) -> CommandResult:
         return CommandResult(False, stderr="RCON command was empty.")
 
     global _LIST_CACHE
+    is_list = command.lower() == "list"
 
     # Cache frequent "list" polls so the dashboard does not open a new
     # Minecraft 1.12 RCON socket every couple of seconds.
-    if command.lower() == "list" and _LIST_CACHE is not None:
+    if is_list and _LIST_CACHE is not None:
         cached_at, cached = _LIST_CACHE
         if time.monotonic() - cached_at < _LIST_CACHE_TTL and cached.ok:
             return cached
 
     with _LOCK:
+        # Re-check inside the lock so parallel /api/v1/status polls share one
+        # socket instead of each opening their own after a cache miss.
+        if is_list and _LIST_CACHE is not None:
+            cached_at, cached = _LIST_CACHE
+            if time.monotonic() - cached_at < _LIST_CACHE_TTL and cached.ok:
+                return cached
+
         if time.monotonic() < _COOLDOWN_UNTIL:
+            if is_list and _LIST_CACHE is not None:
+                return _LIST_CACHE[1]
             return CommandResult(
                 False,
                 stderr=(
@@ -231,7 +242,7 @@ def send(command: str, timeout: float = 4.0) -> CommandResult:
 
         host, port, password = resolve_credentials()
         if not _port_open(host, int(port)):
-            _mark_cooldown(3.0)
+            _mark_cooldown(5.0)
             return CommandResult(
                 False,
                 stderr=(
@@ -284,11 +295,14 @@ def send(command: str, timeout: float = 4.0) -> CommandResult:
                         False, stderr="RCON returned an invalid packet type."
                     )
                 result = CommandResult(True, stdout=body.strip())
-                if command.lower() == "list":
+                if is_list:
                     _LIST_CACHE = (time.monotonic(), result)
                 return result
         except (OSError, ValueError, ConnectionError, struct.error) as exc:
             _mark_cooldown()
+            if is_list and _LIST_CACHE is not None:
+                # Prefer stale player counts over hammering a dead listener.
+                return _LIST_CACHE[1]
             return CommandResult(False, stderr=f"RCON unavailable: {exc}")
 
 
