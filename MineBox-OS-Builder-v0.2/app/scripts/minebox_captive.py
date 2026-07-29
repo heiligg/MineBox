@@ -3,7 +3,8 @@
 
 Phones/PCs open http://192.168.4.1 (port 80). The dashboard listens on 8080
 (optionally HTTPS). This server:
-  - fails Microsoft/Android/Apple captive probes so the OS opens a sign-in page
+  - answers Microsoft/Android/Apple captive probes as SUCCESS so Windows keeps
+    the SoftAP link instead of jumping back to home Wi-Fi
   - reverse-proxies everything else to the local dashboard over HTTP so hotspot
     clients get a working UI without self-signed certificate friction
 """
@@ -107,38 +108,33 @@ class CaptiveHandler(BaseHTTPRequestHandler):
         return False
 
     def _answer_probe(self, path: str) -> None:
-        # Intentionally FAIL OS captive checks so Windows/Android/iOS open a
-        # sign-in browser to http://192.168.4.1 instead of silently bouncing
-        # back to a home Wi-Fi that has "real" internet.
-        portal = f"http://{DASHBOARD_HOST}/"
+        # SUCCESS responses keep Windows associated. Failing these made the PC
+        # drop MineBox-Setup and reconnect to home Wi-Fi. Dashboard URL is
+        # advertised via DHCP option 114 and http://192.168.4.1.
         if path.endswith("/connecttest.txt") or path == "/connecttest.txt":
-            self._send(200, b"MineBox needs sign-in", "text/plain")
+            self._send(200, b"Microsoft Connect Test", "text/plain")
             return
         if path.endswith("/ncsi.txt") or path == "/ncsi.txt":
-            self._send(200, b"MineBox needs sign-in", "text/plain")
+            self._send(200, b"Microsoft NCSI", "text/plain")
             return
         if "generate_204" in path or path.endswith("/gen_204") or path in {
             "/success.txt",
             "/generate_204",
         }:
-            self.send_response(302)
-            self.send_header("Location", portal)
+            self.send_response(204)
             self.send_header("Content-Length", "0")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Connection", "close")
             self.end_headers()
             return
         if "hotspot-detect.html" in path or "library/test/success.html" in path:
-            body = (
-                "<HTML><HEAD><TITLE>MineBox</TITLE>"
-                f"<meta http-equiv='refresh' content='0;url={portal}'>"
-                f"</HEAD><BODY><a href='{portal}'>Continue to MineBox</a>"
-                "</BODY></HTML>"
-            ).encode()
-            self._send(200, body, "text/html")
+            self._send(
+                200,
+                b"<HTML><HEAD><TITLE>Success</TITLE></HEAD><BODY>Success</BODY></HTML>",
+                "text/html",
+            )
             return
-        self.send_response(302)
-        self.send_header("Location", portal)
+        self.send_response(204)
         self.send_header("Content-Length", "0")
         self.send_header("Connection", "close")
         self.end_headers()
