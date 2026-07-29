@@ -5,9 +5,6 @@ Wiring:
   button COM  -> GND
   button NO   -> GPIO17 (physical pin 11)
   Do NOT wire the button to 3.3V or 5V when using pull_up=True.
-
-Note: gpiozero's bounce_time only filters callbacks. Reading .is_pressed still
-sees raw bounce, so this script uses its own stable-state machine.
 """
 
 from __future__ import annotations
@@ -18,98 +15,89 @@ import time
 from gpiozero import Button
 
 BUTTON_GPIO = 17
-# How long the pin must stay in a new state before we accept it (seconds).
-STABLE_TIME = 0.20
-# After a completed click, ignore the pin completely (seconds).
-POST_CLICK_LOCKOUT = 0.60
-SAMPLE_DT = 0.005
+# Classic debounce: accept a new level only after it has been unchanged this long.
+DEBOUNCE_S = 0.04
+# Ignore new clicks briefly after a completed click (kills release bounce).
+LOCKOUT_S = 0.25
+POLL_S = 0.002
 
 
-def sample_pressed(button: Button, window_s: float = 0.05) -> bool:
-    """Majority vote over a short window (filters sub-ms bounce)."""
-    votes = 0
-    total = max(1, int(window_s / SAMPLE_DT))
-    for _ in range(total):
-        if button.is_pressed:
-            votes += 1
-        time.sleep(SAMPLE_DT)
-    return votes * 2 >= total
-
-
-def wait_for_state(button: Button, want_pressed: bool, stable_s: float) -> float:
-    """Wait until majority-sampled state matches want_pressed for stable_s.
-
-    Returns how long the accepted state had already been held (approx).
-    """
-    stable_since: float | None = None
-    while True:
-        pressed = sample_pressed(button)
-        if pressed == want_pressed:
-            now = time.monotonic()
-            if stable_since is None:
-                stable_since = now
-            elif now - stable_since >= stable_s:
-                return now - stable_since
-        else:
-            stable_since = None
-
-
-def run_test(stable_s: float, lockout_s: float) -> int:
-    # bounce_time=None: we debounce ourselves via sampling + stability window.
+def run_test(debounce_s: float, lockout_s: float) -> int:
     button = Button(BUTTON_GPIO, pull_up=True, bounce_time=None)
     press_count = 0
 
-    idle = sample_pressed(button)
-    print("MineBox button test (software state-machine debounce)")
+    # Stable logical state (False = released / pulled up).
+    stable_pressed = bool(button.is_pressed)
+    last_raw = stable_pressed
+    last_change = time.monotonic()
+    awaiting_release = False
+    held_at = 0.0
+    unlock_at = 0.0
+
+    print("MineBox button test (classic debounce)")
     print(f"  BCM GPIO{BUTTON_GPIO}  pull_up=True")
-    print(f"  stable={stable_s:.2f}s  lockout={lockout_s:.2f}s")
+    print(f"  debounce={debounce_s*1000:.0f}ms  lockout={lockout_s*1000:.0f}ms")
     print("  Wiring: COM->GND, NO->GPIO17. No 3.3V/5V on the switch.")
     print(
         "  Idle: "
         + (
             "PRESSED/shorted — check wiring (should be released)"
-            if idle
+            if stable_pressed
             else "released (OK)"
         )
     )
-    print("  One physical click => one PRESSED + one RELEASED.")
-    print("  Ctrl+C to exit.")
+    print("  Click the button. Ctrl+C to exit.")
     print()
 
     try:
         while True:
-            wait_for_state(button, want_pressed=True, stable_s=stable_s)
-            press_count += 1
-            held_at = time.monotonic()
-            print(f"[{press_count}] PRESSED", flush=True)
+            now = time.monotonic()
+            raw = bool(button.is_pressed)
 
-            wait_for_state(button, want_pressed=False, stable_s=stable_s)
-            held_ms = int((time.monotonic() - held_at) * 1000)
-            print(
-                f"[{press_count}] RELEASED  (held ~{held_ms} ms) — one click",
-                flush=True,
-            )
-            print(flush=True)
+            if raw != last_raw:
+                last_raw = raw
+                last_change = now
 
-            # Hard lockout: do not sample the pin at all (release bounce dies here).
-            time.sleep(lockout_s)
+            # Only accept a new stable level after debounce quiet time.
+            if (
+                raw != stable_pressed
+                and (now - last_change) >= debounce_s
+                and now >= unlock_at
+            ):
+                stable_pressed = raw
+
+                if stable_pressed and not awaiting_release:
+                    press_count += 1
+                    awaiting_release = True
+                    held_at = now
+                    print(f"[{press_count}] PRESSED", flush=True)
+                elif (not stable_pressed) and awaiting_release:
+                    held_ms = int((now - held_at) * 1000)
+                    awaiting_release = False
+                    unlock_at = now + lockout_s
+                    print(
+                        f"[{press_count}] RELEASED  (held ~{held_ms} ms) — one click",
+                        flush=True,
+                    )
+                    print(flush=True)
+
+            time.sleep(POLL_S)
     except KeyboardInterrupt:
         print("\nExiting.")
         return 0
 
 
 def run_raw(seconds: float = 15.0) -> int:
-    """Print every raw level change for diagnosing wiring/noise."""
     button = Button(BUTTON_GPIO, pull_up=True, bounce_time=None)
     print(f"Raw GPIO{BUTTON_GPIO} monitor for {seconds:.0f}s (Ctrl+C to stop)")
-    print("Press the button once and watch how many flips appear.")
+    print("Press once and count DOWN/UP flips.")
     print()
-    last = button.is_pressed
+    last = bool(button.is_pressed)
     flips = 0
     end = time.monotonic() + seconds
     try:
         while time.monotonic() < end:
-            now = button.is_pressed
+            now = bool(button.is_pressed)
             if now != last:
                 flips += 1
                 print(
@@ -122,38 +110,31 @@ def run_raw(seconds: float = 15.0) -> int:
     except KeyboardInterrupt:
         pass
     print(f"\nTotal raw flips: {flips}")
-    if flips > 4:
-        print(
-            "Lots of flips on one click = noisy switch/wiring. "
-            "Shorten wires, twist with GND, add 0.1uF across the switch, "
-            "or use a better switch."
-        )
     return 0
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="MineBox GPIO17 button test")
+    parser.add_argument("--raw", action="store_true", help="Show raw pin flips")
     parser.add_argument(
-        "--raw",
-        action="store_true",
-        help="Show raw pin flips instead of debounced clicks",
-    )
-    parser.add_argument(
-        "--stable",
+        "--debounce",
         type=float,
-        default=STABLE_TIME,
-        help=f"Stable window seconds (default {STABLE_TIME})",
+        default=DEBOUNCE_S,
+        help=f"Debounce seconds (default {DEBOUNCE_S})",
     )
     parser.add_argument(
         "--lockout",
         type=float,
-        default=POST_CLICK_LOCKOUT,
-        help=f"Post-click lockout seconds (default {POST_CLICK_LOCKOUT})",
+        default=LOCKOUT_S,
+        help=f"Post-click lockout seconds (default {LOCKOUT_S})",
     )
     args = parser.parse_args()
     if args.raw:
         return run_raw()
-    return run_test(stable_s=max(0.05, args.stable), lockout_s=max(0.1, args.lockout))
+    return run_test(
+        debounce_s=max(0.01, args.debounce),
+        lockout_s=max(0.05, args.lockout),
+    )
 
 
 if __name__ == "__main__":
