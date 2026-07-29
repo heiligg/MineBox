@@ -2,16 +2,16 @@
 """MineBox dual pushbutton hardware test.
 
 Left:  BCM GPIO17 (active low, internal pull-up) — physical pin 11
-Right: BCM GPIO27 (active low, internal pull-up) — physical pin 13
+Right: BCM GPIO23 (active low, internal pull-up) — physical pin 16
 
 Wiring per button (active-low):
-  COM -> GND
+  COM -> GND (e.g. physical pin 14)
   NO  -> that button's GPIO
   Do NOT wire the switch to 3.3V or 5V.
 
 If Right never fires:
   1) python3 ~/button_test.py --scan
-  2) With the script running, briefly jumper physical pin 13 to any GND.
+  2) With the script running, briefly jumper physical pin 16 to GND (pin 14).
      If that prints 'Right button pressed', the pin is fine and the switch/wiring is wrong.
   3) Try: python3 ~/button_test.py --right-active-high
 """
@@ -24,11 +24,11 @@ import time
 from gpiozero import Button
 
 LEFT_GPIO = 17
-RIGHT_GPIO = 27
+RIGHT_GPIO = 23
 DEBOUNCE_S = 0.04
 LOCKOUT_S = 0.25
 POLL_S = 0.002
-SCAN_GPIOS = (17, 27, 22, 23, 24, 5, 6, 16, 26, 13, 19, 20, 21, 18, 12)
+SCAN_GPIOS = (17, 23, 27, 22, 24, 5, 6, 16, 26, 13, 19, 20, 21, 18, 12)
 
 
 class DebouncedButton:
@@ -81,7 +81,7 @@ def run_test(left_gpio: int, right_gpio: int, *, right_pull_up: bool) -> int:
     print(f"  Left  BCM GPIO{left_gpio}  pull_up=True   (phys pin 11 if GPIO17)")
     print(
         f"  Right BCM GPIO{right_gpio}  pull_up={right_pull_up}  "
-        f"(phys pin 13 if GPIO27)"
+        f"(phys pin 16 if GPIO23)"
     )
     print(f"  debounce={DEBOUNCE_S*1000:.0f}ms  lockout={LOCKOUT_S*1000:.0f}ms")
     print(
@@ -92,7 +92,7 @@ def run_test(left_gpio: int, right_gpio: int, *, right_pull_up: bool) -> int:
         "  Idle right: "
         + ("PRESSED/shorted" if right.stable_pressed else "released (OK)")
     )
-    print("  Hardware check: jumper pin 13 to GND — should print Right pressed.")
+    print("  Hardware check: jumper pin 16 to pin 14 (GND) — should print Right pressed.")
     print("  Ctrl+C to exit.")
     print()
 

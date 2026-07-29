@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Live level monitor for MineBox right-button debugging.
+"""Live level monitor for MineBox button debugging.
 
-Prints GPIO27 (and a few neighbor pins) once per second, and immediately
-on any change. Use a jumper from the pin to GND to prove the pin works.
+Left:  BCM17 = physical pin 11
+Right: BCM23 = physical pin 16 (GND on pin 14)
 """
 
 from __future__ import annotations
@@ -13,15 +13,12 @@ from gpiozero import DigitalInputDevice
 
 # BCM -> physical pin on 40-pin header
 PINS = {
-    17: 11,  # left (known working)
-    27: 13,  # expected right
-    22: 15,  # often confused with 13
-    23: 16,
+    17: 11,  # left
+    23: 16,  # right (recommended)
+    27: 13,  # alternate right
+    22: 15,
     24: 18,
     18: 12,
-    10: 19,
-    9: 21,
-    11: 23,
 }
 
 
@@ -30,21 +27,25 @@ def main() -> int:
     last: dict[int, int] = {}
 
     print("MineBox GPIO live monitor")
-    print("  Expected right button: BCM27 = physical pin 13")
-    print("  Test: jumper pin 13 to GND — line should flip to LOW")
+    print("  Left:  BCM17 = physical pin 11")
+    print("  Right: BCM23 = physical pin 16  (GND = pin 14)")
+    print("  Test: jumper pin 16 to pin 14 — BCM23 should flip")
     print("  Ctrl+C to exit")
     print()
 
     for bcm, phys in PINS.items():
         try:
-            # pull_up=True: open=1, short-to-GND=0
+            # pull_up=True: open=inactive, short-to-GND=active
             dev = DigitalInputDevice(bcm, pull_up=True)
         except Exception as exc:  # noqa: BLE001
             print(f"  skip BCM{bcm} (pin {phys}): {exc}")
             continue
         devices[bcm] = dev
         last[bcm] = int(dev.value)
-        print(f"  BCM{bcm:2d} phys={phys:2d} idle={last[bcm]} ({'HIGH/up' if last[bcm] else 'LOW/down'})")
+        print(
+            f"  BCM{bcm:2d} phys={phys:2d} idle={last[bcm]} "
+            f"({'ACTIVE' if last[bcm] else 'idle'})"
+        )
 
     print()
     next_status = time.monotonic()
@@ -59,14 +60,14 @@ def main() -> int:
                     print(
                         f"{time.strftime('%H:%M:%S')}  BCM{bcm} (pin {phys}) "
                         f"{last[bcm]} -> {val}  "
-                        f"{'RELEASED' if val else 'PRESSED/SHORT to GND'}",
+                        f"{'PRESSED/SHORT' if val else 'RELEASED'}",
                         flush=True,
                     )
                     last[bcm] = val
                     changed = True
             if now >= next_status and not changed:
                 bits = "  ".join(
-                    f"{bcm}:{'H' if last[bcm] else 'L'}" for bcm in sorted(last)
+                    f"{bcm}:{'P' if last[bcm] else '-'}" for bcm in sorted(last)
                 )
                 print(f"{time.strftime('%H:%M:%S')}  {bits}", flush=True)
                 next_status = now + 1.0
