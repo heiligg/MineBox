@@ -189,6 +189,17 @@ if [ -d deploy ]; then
     -exec cp -t "$ROOT_DIR/output/logs" {} + 2>/dev/null || true
 fi
 
+# Checksums for CI artifact verification (SHA256SUMS in output/).
+(
+  cd "$ROOT_DIR/output"
+  # shellcheck disable=SC2035
+  sha256sum *.img *.img.xz *.img.gz *.zip 2>/dev/null | tee SHA256SUMS || true
+  if [ ! -s SHA256SUMS ]; then
+    find . -maxdepth 1 -type f \( -name '*.img' -o -name '*.img.xz' \) -printf '%f\n' \
+      | while read -r f; do sha256sum "$f"; done | tee SHA256SUMS
+  fi
+)
+
 echo
 echo "Build complete. Output files are in:"
 echo "  $ROOT_DIR/output"
