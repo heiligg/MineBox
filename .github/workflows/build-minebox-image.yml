@@ -7,31 +7,46 @@ on:
       - main
     paths:
       - ".github/workflows/build-minebox-image.yml"
+      - ".github/workflows/build-image.yml"
+      - ".github/scripts/**"
       - "MineBox-OS-Builder-v0.2/**"
 
 concurrency:
   group: minebox-image-${{ github.ref }}
   cancel-in-progress: true
 
+# Write required to publish image via draft release assets (bypasses Actions artifact quota).
 permissions:
-  contents: read
+  contents: write
+  actions: write
+
+env:
+  BUILDER: MineBox-OS-Builder-v0.2
+  # Mutable draft release used as image drop-box (not a product version tag).
+  CI_IMAGE_TAG: ci-image-latest
 
 jobs:
   build-image:
     name: Build Raspberry Pi 5 image
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
       - name: Check out MineBox
         uses: actions/checkout@v4
 
+      - name: Read VERSION
+        id: meta
+        run: |
+          VERSION="$(tr -d '\r' <"${BUILDER}/VERSION" | head -n1)"
+          echo "version=${VERSION}" >>"$GITHUB_OUTPUT"
+
       - name: Free runner disk space
         run: |
-          sudo rm -rf /usr/local/lib/android
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo docker system prune --all --force || true
+          set -euo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup || true
+          sudo docker system prune --all --volumes --force || true
           df -h
 
       - name: Set up ARM64 emulation
@@ -44,36 +59,146 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             git rsync coreutils xz-utils zip unzip \
-            qemu-user qemu-user-static binfmt-support
+            qemu-user-static binfmt-support \
+            python3 ca-certificates
 
       - name: Verify ARM64 emulator
         run: |
-          command -v qemu-aarch64
-          qemu-aarch64 --version
-          docker run --rm --platform linux/arm64 debian:bookworm uname -m
+          command -v qemu-aarch64-static || command -v qemu-aarch64
+          docker run --rm --platform linux/arm64 debian:bookworm-slim uname -m
+
+      - name: Cache pi-gen clone
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BUILDER }}/.build/pi-gen
+          key: pi-gen-arm64-${{ runner.os }}-v2
+          restore-keys: |
+            pi-gen-arm64-${{ runner.os }}-
+
+      - name: Make scripts executable
+        run: |
+          chmod +x "${BUILDER}/build.sh" "${BUILDER}/check-project.sh"
+          if [ -d .github/scripts ]; then chmod +x .github/scripts/*.sh; fi
+
+      - name: Static project check
+        working-directory: ${{ env.BUILDER }}
+        run: ./check-project.sh
 
       - name: Build MineBox OS
-        working-directory: MineBox-OS-Builder-v0.2
+        working-directory: ${{ env.BUILDER }}
         run: |
-          chmod +x build.sh check-project.sh
-          ./build.sh --docker
+          set -euo pipefail
+          mkdir -p ci-artifacts/logs
+          ./build.sh --docker 2>&1 | tee ci-artifacts/logs/build.sh.log
 
-      - name: Show build output
+      - name: Post-process / validate (when helpers present)
+        if: success()
+        run: |
+          set -euo pipefail
+          if [ -x .github/scripts/postprocess-image.sh ]; then
+            .github/scripts/postprocess-image.sh "${BUILDER}"
+          fi
+          if [ -x .github/scripts/write-build-manifest.sh ]; then
+            .github/scripts/write-build-manifest.sh "${BUILDER}"
+          fi
+          if [ -x .github/scripts/validate-minebox-image.sh ]; then
+            .github/scripts/validate-minebox-image.sh "${BUILDER}"
+          fi
+          # Ensure checksums exist even without helpers
+          if [ ! -s "${BUILDER}/output/SHA256SUMS" ]; then
+            ( cd "${BUILDER}/output" && sha256sum *.img.xz >SHA256SUMS )
+          fi
+          ls -lah "${BUILDER}/output"
+
+      - name: Collect logs
         if: always()
         run: |
-          find MineBox-OS-Builder-v0.2/output -maxdepth 1 -type f -printf '%f %s bytes\n' 2>/dev/null || true
-          df -h
+          set -euo pipefail
+          mkdir -p "${BUILDER}/ci-artifacts/logs"
+          df -h | tee "${BUILDER}/ci-artifacts/logs/df.txt" || true
+          find "${BUILDER}/output" -maxdepth 2 -printf '%p %s\n' \
+            | tee "${BUILDER}/ci-artifacts/logs/output-listing.txt" || true
+          tar -C "${BUILDER}/ci-artifacts" -czf "${BUILDER}/ci-artifacts/build-logs.tar.gz" logs || true
 
-      - name: Upload MineBox image
+      - name: Publish image via draft GitHub Release assets
+        id: release_upload
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          XZ="$(ls -1t "${BUILDER}/output"/*.img.xz | head -n1)"
+          test -f "$XZ"
+          STABLE="${BUILDER}/output/MineBox_OS_Prototype_v1.0_RPi5.img.xz"
+          cp -f "$XZ" "$STABLE"
+          test -f "${BUILDER}/output/SHA256SUMS"
+
+          # Create or reuse mutable draft release tag (not a product version release).
+          if gh release view "${CI_IMAGE_TAG}" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            echo "Updating existing draft release ${CI_IMAGE_TAG}"
+          else
+            gh release create "${CI_IMAGE_TAG}" \
+              --repo "${{ github.repository }}" \
+              --title "MineBox CI image (draft drop-box)" \
+              --notes "Automated CI image drop-box. Not a versioned product release. Replaced on each successful image build." \
+              --draft \
+              --target "${{ github.sha }}"
+          fi
+
+          # Upload / replace assets on the draft release (release storage ≠ Actions artifact quota).
+          gh release upload "${CI_IMAGE_TAG}" \
+            "$STABLE" \
+            "${BUILDER}/output/SHA256SUMS" \
+            --repo "${{ github.repository }}" \
+            --clobber
+
+          if [ -f "${BUILDER}/output/build-manifest.json" ]; then
+            gh release upload "${CI_IMAGE_TAG}" \
+              "${BUILDER}/output/build-manifest.json" \
+              --repo "${{ github.repository }}" \
+              --clobber
+          fi
+          if [ -f "${BUILDER}/ci-artifacts/validation.log" ]; then
+            gh release upload "${CI_IMAGE_TAG}" \
+              "${BUILDER}/ci-artifacts/validation.log" \
+              --repo "${{ github.repository }}" \
+              --clobber || true
+          fi
+          if [ -f "${BUILDER}/ci-artifacts/build-logs.tar.gz" ]; then
+            gh release upload "${CI_IMAGE_TAG}" \
+              "${BUILDER}/ci-artifacts/build-logs.tar.gz" \
+              --repo "${{ github.repository }}" \
+              --clobber || true
+          fi
+
+          echo "Published to draft release tag ${CI_IMAGE_TAG}"
+          gh release view "${CI_IMAGE_TAG}" --repo "${{ github.repository }}"
+
+      - name: Upload small logs via Actions artifacts (best-effort)
+        if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
-          name: MineBox-OS-Raspberry-Pi-5-${{ github.run_number }}
+          name: MineBox-OS-RPi5-build-logs
           path: |
-            MineBox-OS-Builder-v0.2/output/*.img
-            MineBox-OS-Builder-v0.2/output/*.img.xz
-            MineBox-OS-Builder-v0.2/output/*.img.gz
-            MineBox-OS-Builder-v0.2/output/*.zip
-            MineBox-OS-Builder-v0.2/output/*.bmap
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 7
+            ${{ env.BUILDER }}/ci-artifacts/logs/**
+            ${{ env.BUILDER }}/ci-artifacts/build-logs.tar.gz
+            ${{ env.BUILDER }}/ci-artifacts/validation.log
+            ${{ env.BUILDER }}/output/SHA256SUMS
+            ${{ env.BUILDER }}/output/build-manifest.json
+          if-no-files-found: warn
+          retention-days: 5
+
+      - name: Fail if image was not published
+        if: success()
+        run: |
+          if [ "${{ steps.release_upload.outcome }}" != "success" ]; then
+            echo "ERROR: draft release upload failed and is required (Actions artifact quota workaround)."
+            exit 1
+          fi
+
+      - name: Prune bulky pi-gen work before cache save
+        if: always()
+        run: |
+          rm -rf "${BUILDER}/.build/pi-gen/work" "${BUILDER}/.build/pi-gen/deploy" || true
+          df -h

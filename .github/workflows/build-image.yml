@@ -1,0 +1,185 @@
+name: Build MineBox OS Image
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/build-image.yml"
+      - ".github/scripts/**"
+      - "MineBox-OS-Builder-v0.2/build.sh"
+      - "MineBox-OS-Builder-v0.2/check-project.sh"
+      - "MineBox-OS-Builder-v0.2/config/minebox-pi5.conf"
+      - "MineBox-OS-Builder-v0.2/pi-gen/**"
+      - "MineBox-OS-Builder-v0.2/app/**"
+      - "MineBox-OS-Builder-v0.2/requirements.txt"
+      - "MineBox-OS-Builder-v0.2/VERSION"
+  workflow_call:
+    outputs:
+      minebox_version:
+        description: MineBox VERSION string
+        value: ${{ jobs.build-image.outputs.minebox_version }}
+      image_xz_name:
+        description: Compressed image filename
+        value: ${{ jobs.build-image.outputs.image_xz_name }}
+      artifact_name:
+        description: Uploaded image artifact name
+        value: ${{ jobs.build-image.outputs.artifact_name }}
+
+concurrency:
+  group: minebox-image-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  BUILDER: MineBox-OS-Builder-v0.2
+  ARTIFACT_NAME: MineBox-OS-RPi5-image
+
+jobs:
+  build-image:
+    name: Build Raspberry Pi 5 image
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    outputs:
+      minebox_version: ${{ steps.meta.outputs.version }}
+      image_xz_name: ${{ steps.post.outputs.image_xz_name }}
+      artifact_name: ${{ env.ARTIFACT_NAME }}
+
+    steps:
+      - name: Check out MineBox
+        uses: actions/checkout@v4
+
+      - name: Read VERSION
+        id: meta
+        run: |
+          VERSION="$(tr -d '\r' <"${BUILDER}/VERSION" | head -n1)"
+          echo "version=${VERSION}" >>"$GITHUB_OUTPUT"
+          echo "MineBox version: ${VERSION}"
+
+      - name: Free runner disk space
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/.ghcup || true
+          sudo docker system prune --all --volumes --force || true
+          df -h
+
+      - name: Set up ARM64 emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git rsync coreutils xz-utils zip unzip \
+            qemu-user-static binfmt-support \
+            python3 ca-certificates
+
+      - name: Verify ARM64 emulator
+        run: |
+          command -v qemu-aarch64-static || command -v qemu-aarch64
+          docker run --rm --platform linux/arm64 debian:bookworm-slim uname -m
+
+      - name: Cache pi-gen clone
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.BUILDER }}/.build/pi-gen
+          key: pi-gen-arm64-${{ runner.os }}-${{ hashFiles('.github/workflows/build-image.yml') }}
+          restore-keys: |
+            pi-gen-arm64-${{ runner.os }}-
+
+      - name: Make scripts executable
+        run: |
+          chmod +x "${BUILDER}/build.sh" "${BUILDER}/check-project.sh"
+          chmod +x .github/scripts/*.sh
+
+      - name: Static project check
+        working-directory: ${{ env.BUILDER }}
+        run: ./check-project.sh
+
+      - name: Build MineBox OS (pi-gen / Docker)
+        id: build
+        working-directory: ${{ env.BUILDER }}
+        run: |
+          set -euo pipefail
+          mkdir -p ci-artifacts/logs
+          # Tee full build output for artifact upload on success or failure.
+          ./build.sh --docker 2>&1 | tee ci-artifacts/logs/build.sh.log
+
+      - name: Post-process image artifacts
+        id: post
+        if: success()
+        run: .github/scripts/postprocess-image.sh "${BUILDER}"
+
+      - name: Write build manifest
+        if: success()
+        run: .github/scripts/write-build-manifest.sh "${BUILDER}"
+
+      - name: Validate image
+        if: success()
+        run: .github/scripts/validate-minebox-image.sh "${BUILDER}"
+
+      - name: Collect failure / always logs
+        if: always()
+        run: |
+          set -euo pipefail
+          mkdir -p "${BUILDER}/ci-artifacts/logs"
+          df -h | tee "${BUILDER}/ci-artifacts/logs/df.txt" || true
+          find "${BUILDER}/output" -maxdepth 2 -printf '%p %s\n' \
+            | tee "${BUILDER}/ci-artifacts/logs/output-listing.txt" || true
+          find "${BUILDER}/.build/pi-gen/deploy" -maxdepth 3 -printf '%p %s\n' \
+            | tee "${BUILDER}/ci-artifacts/logs/deploy-listing.txt" || true
+          # Compress logs for upload
+          tar -C "${BUILDER}/ci-artifacts" -czf "${BUILDER}/ci-artifacts/build-logs.tar.gz" logs \
+            || true
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MineBox-OS-RPi5-build-logs
+          path: |
+            ${{ env.BUILDER }}/ci-artifacts/logs/**
+            ${{ env.BUILDER }}/ci-artifacts/build-logs.tar.gz
+            ${{ env.BUILDER }}/ci-artifacts/validation.log
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload validation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MineBox-OS-RPi5-validation
+          path: |
+            ${{ env.BUILDER }}/ci-artifacts/validation.log
+            ${{ env.BUILDER }}/ci-artifacts/build-manifest.json
+            ${{ env.BUILDER }}/output/build-manifest.json
+            ${{ env.BUILDER }}/output/SHA256SUMS
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload MineBox image artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: |
+            ${{ env.BUILDER }}/output/*.img.xz
+            ${{ env.BUILDER }}/output/*.img
+            ${{ env.BUILDER }}/output/SHA256SUMS
+            ${{ env.BUILDER }}/output/build-manifest.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+      - name: Prune bulky pi-gen work before cache save
+        if: always()
+        run: |
+          # Keep the pi-gen git checkout cached; drop multi-GB work/deploy trees.
+          rm -rf "${BUILDER}/.build/pi-gen/work" "${BUILDER}/.build/pi-gen/deploy" || true
+          df -h
