@@ -1,0 +1,62 @@
+# MineBox hardware profile (example)
+# Appliance path: /etc/minebox/hardware.toml
+#
+# Button BCM assignments below are PROVISIONAL / UNVERIFIED_AGAINST_PCB.
+# Do not invent encoder, LED, or fan GPIO numbers — leave unset until
+# docs/v1/Hardware_Pinout.md is source-verified from the PCB.
+
+[profile]
+name = "raspberry_pi5"
+verification = "UNVERIFIED_AGAINST_PCB"
+
+[buttons]
+# Active-low with internal pull-up (press shorts to GND).
+active_level = "active_low"
+pull = "up"
+debounce_ms = 40
+long_press_ms = 450
+lockout_ms = 150
+poll_ms = 5
+
+[buttons.left]
+gpio_bcm = 23
+physical_pin = 16
+# short_press / long_press actions (v1 defaults preserve curses mapping)
+short_action = "nav_previous"
+long_action = "back"
+
+[buttons.right]
+gpio_bcm = 17
+physical_pin = 11
+short_action = "nav_next"
+long_action = "confirm"
+
+[encoder]
+# Adafruit 5880 — pins NOT_CONFIGURED until PCB pinout is in the repo.
+enabled = false
+status = "NOT_CONFIGURED"
+# gpio_a = unset
+# gpio_b = unset
+# gpio_button = unset
+
+[leds]
+# Illuminated button LEDs — NOT_CONFIGURED until PCB pinout is verified.
+left_status = "NOT_CONFIGURED"
+right_status = "NOT_CONFIGURED"
+# left_gpio_bcm = unset
+# right_gpio_bcm = unset
+
+[fan]
+# Fan GPIO/PWM control — use platform cooling until PCB pinout verified.
+mode = "platform"   # platform | gpio | pwm | disabled
+status = "NOT_CONFIGURED"
+# gpio_bcm = unset
+off_below_c = 55.0
+on_above_c = 65.0
+warning_c = 80.0
+critical_c = 90.0
+
+[power]
+# Implemented via systemd/sudoers helpers, not GPIO.
+shutdown_method = "systemd"
+reboot_method = "systemd"

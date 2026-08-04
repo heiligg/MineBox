@@ -1,0 +1,4 @@
+IMAGE ARTIFACT: NOT GENERATED IN THIS ENVIRONMENT
+Reason: full pi-gen/Docker image build requires Linux + Docker + substantial disk.
+Validate stages with check-project.sh / build.sh --docker on a Linux host.
+Recorded at: 2026-08-03T21:57:26Z

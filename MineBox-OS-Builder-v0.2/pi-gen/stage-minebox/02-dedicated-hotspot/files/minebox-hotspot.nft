@@ -1,23 +1,40 @@
 #!/usr/sbin/nft -f
+# MineBox default nftables policy (Checkpoint 6).
+# Hotspot iface default wlan0 — regenerate with networking.firewall when roles differ.
+# SoftAP works without uplink; NAT/masquerade only forwards hotspot → uplink.
 
 flush ruleset
 
 table inet minebox_filter {
     chain input {
-        type filter hook input priority 0; policy accept;
+        type filter hook input priority 0; policy drop;
 
-        # Hotspot clients talking to the Pi itself (SSH/dashboard/DNS/DHCP).
-        iifname "wlan0" tcp dport { 22, 80, 8080 } accept
+        iifname "lo" accept
+        ct state established,related accept
+        ct state invalid drop
+        ip protocol icmp icmp type echo-request limit rate 5/second accept
+
+        # Hotspot clients: DHCP, DNS, captive/dashboard, Minecraft
         iifname "wlan0" udp dport { 53, 67 } accept
-        iifname "wlan0" tcp dport 53 accept
+        iifname "wlan0" tcp dport { 53, 80, 8080, 25565 } accept
+
+        # Trusted LAN (non-hotspot, non-tailscale): dashboard + Minecraft
+        iifname != "wlan0" iifname != "lo" iifname != "tailscale0" tcp dport { 80, 8080, 25565 } accept
+
+        # Tailscale: ports allowed at firewall; app-level expose_* toggles still required
+        iifname "tailscale0" tcp dport { 80, 8080, 25565 } accept
+
+        # RCON and SSH are not publicly exposed by default
+        tcp dport { 25575, 22 } drop
+        tcp dport { 80, 8080 } drop
     }
 
     chain forward {
         type filter hook forward priority 0; policy drop;
-
         ct state established,related accept
         ct state invalid drop
 
+        # Optional internet sharing — hotspot clients to uplink only
         iifname "wlan0" oifname != "wlan0" ip saddr 192.168.4.0/24 accept
         iifname != "wlan0" oifname "wlan0" ip daddr 192.168.4.0/24 ct state established,related accept
     }

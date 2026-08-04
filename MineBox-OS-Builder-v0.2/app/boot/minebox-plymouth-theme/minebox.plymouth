@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=MineBox
+Description=MineBox OS Prototype splash (placeholder)
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/minebox
+ScriptFile=/usr/share/plymouth/themes/minebox/minebox.script

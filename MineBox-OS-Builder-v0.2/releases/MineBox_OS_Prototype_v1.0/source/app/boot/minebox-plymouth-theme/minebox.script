@@ -1,0 +1,11 @@
+# Placeholder Plymouth script — shows a simple message.
+# Not claimed validated on physical hardware in Checkpoint 5.
+
+message_sprite = Sprite();
+message_sprite.SetPosition(10, 10, 10000);
+
+fun refresh_callback() {
+    message_sprite.SetText("MineBox starting…");
+}
+
+Plymouth.SetRefreshFunction(refresh_callback);

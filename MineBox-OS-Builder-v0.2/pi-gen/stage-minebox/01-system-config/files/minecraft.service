@@ -1,7 +1,11 @@
 [Unit]
 Description=MineBox active Minecraft server
-After=network-online.target
+Documentation=file:///opt/minebox/docs/v1/Systemd_Services.md
+# SoftAP-first appliances may never reach network-online; keep as Wants only.
+After=network-online.target local-fs.target
 Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -12,11 +16,14 @@ Environment=PYTHONPATH=/opt/minebox
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/usr/bin/python3 -m services.launcher
 TimeoutStartSec=900
+TimeoutStopSec=45
 Restart=on-failure
 RestartSec=5
-TimeoutStopSec=45
 KillSignal=SIGINT
 SuccessExitStatus=0 130 143
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=minebox-minecraft
 
 [Install]
 WantedBy=multi-user.target

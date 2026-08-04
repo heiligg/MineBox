@@ -1,0 +1,90 @@
+{
+  "product_name": "MineBox OS Prototype",
+  "release_name": "MineBox OS Prototype v1.0",
+  "semantic_version": "1.0.0-prototype.1",
+  "release_type": "prototype",
+  "target_hardware": [
+    "Raspberry Pi 5"
+  ],
+  "supported_base_os": [
+    "Raspberry Pi OS 64-bit (Debian Trixie/Bookworm lineage via pi-gen)"
+  ],
+  "build_timestamp": "2026-08-03T21:57:26Z",
+  "git_commit": "0600166cd6b156b910542448d66a398b70021c55",
+  "included_features": [
+    "typed configuration",
+    "secrets separation",
+    "HAL mock/Pi5/CM5-stub",
+    "first-boot wizard",
+    "auth CSRF rate-limit",
+    "Minecraft lifecycle",
+    "providers",
+    "backup restore",
+    "crash recovery",
+    "thermal monitoring",
+    "Chromium kiosk",
+    "curses fallback",
+    "dual-radio SoftAP",
+    "internet sharing optional",
+    "nftables firewall",
+    "Tailscale provider optional",
+    "idempotent installer",
+    "pi-gen integration"
+  ],
+  "official_server_providers": [
+    "paper",
+    "vanilla"
+  ],
+  "experimental_providers": [
+    "forge",
+    "fabric"
+  ],
+  "hardware_profile_status": {
+    "buttons": "UNVERIFIED_AGAINST_PCB",
+    "encoder": "NOT_CONFIGURED",
+    "leds": "NOT_CONFIGURED",
+    "fan_gpio": "NOT_CONFIGURED",
+    "cm5": "stub"
+  },
+  "network_features": {
+    "softap": true,
+    "internet_sharing": "optional",
+    "firewall": "nftables",
+    "dynamic_iface_render": true
+  },
+  "remote_access_status": "optional_tailscale_disabled_by_default",
+  "test_counts": {
+    "ran": 146,
+    "skipped": 1,
+    "ok": true
+  },
+  "image_status": "not_generated_in_this_environment",
+  "physical_validation_status": "not_performed",
+  "unresolved_gpio_status": "encoder_led_fan_NOT_CONFIGURED",
+  "known_limitations_doc": "docs/v1/Known_Limitations.md",
+  "release_classification": "B",
+  "release_classification_label": "RELEASED \u2014 SOFTWARE PACKAGE VALIDATED, IMAGE BUILD PENDING",
+  "mass_production_ready": false,
+  "artifacts": {
+    "tar_gz": {
+      "name": "MineBox_OS_Prototype_v1.0.tar.gz",
+      "path": "C:\\MineBox-OS\\MineBox-OS-Builder-v0.2\\releases\\MineBox_OS_Prototype_v1.0.tar.gz",
+      "size_bytes": 395351,
+      "sha256": "2df5a0f5ba6918179289b66b2643d88175d0069a7640eafb3479935dacc53817"
+    },
+    "zip": {
+      "name": "MineBox_OS_Prototype_v1.0.zip",
+      "path": "C:\\MineBox-OS\\MineBox-OS-Builder-v0.2\\releases\\MineBox_OS_Prototype_v1.0.zip",
+      "size_bytes": 518798,
+      "sha256": "7abc71e993293f32101d423f05c10d16c97909cdb30e74e643e938a081c18434"
+    },
+    "sha256sums": "C:\\MineBox-OS\\MineBox-OS-Builder-v0.2\\releases\\SHA256SUMS"
+  },
+  "archive_extraction_verification": {
+    "ok": true,
+    "missing": [],
+    "forbidden_found": [],
+    "version": "1.0.0-prototype.1"
+  },
+  "security_scan_ok": true
+}

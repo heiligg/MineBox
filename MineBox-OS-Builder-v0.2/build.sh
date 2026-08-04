@@ -182,6 +182,13 @@ for image_file in "${image_files[@]}"; do
   cp -v "$image_file" "$ROOT_DIR/output/"
 done
 
+# Preserve pi-gen logs for CI / debugging (does not alter image contents).
+mkdir -p "$ROOT_DIR/output/logs"
+if [ -d deploy ]; then
+  find deploy -type f \( -name '*.log' -o -name '*.txt' \) \
+    -exec cp -t "$ROOT_DIR/output/logs" {} + 2>/dev/null || true
+fi
+
 echo
 echo "Build complete. Output files are in:"
 echo "  $ROOT_DIR/output"

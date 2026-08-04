@@ -45,4 +45,5 @@ network.conf
 
 # Local dashboard development data (jars, worlds, secrets)
 runtime/
+.test-runtime/
 .venv/

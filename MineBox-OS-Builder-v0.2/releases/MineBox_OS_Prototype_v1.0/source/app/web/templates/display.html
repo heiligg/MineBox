@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=800, height=480, initial-scale=1" />
+  <title>MineBox Display</title>
+  <link rel="stylesheet" href="/static/display/display.css" />
+</head>
+<body{% if dev_mode %} data-dev="1" class="dev-mode"{% endif %}>
+  <div id="app" aria-live="polite">
+    <div class="topbar"><div class="brand">MineBox</div><div class="clock">Loading…</div></div>
+    <div class="screen active">
+      <div class="banner">Starting local display…</div>
+    </div>
+  </div>
+  <script src="/static/display/display.js"></script>
+</body>
+</html>

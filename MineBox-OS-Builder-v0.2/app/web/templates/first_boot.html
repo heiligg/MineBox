@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="">
+  <title>MineBox First Boot</title>
+  <style>
+    :root { color-scheme: dark; --bg:#080b10; --panel:#11161e; --border:#273140; --text:#f4f7fb; --muted:#94a2b5; --accent:#65d46e; --danger:#ff6b6b; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:24px; font-family: ui-sans-serif, system-ui, sans-serif; color:var(--text); background:radial-gradient(circle at top,#17251b 0,var(--bg) 45%); }
+    .card { width:min(640px,100%); background:var(--panel); border:1px solid var(--border); border-radius:16px; padding:28px; }
+    h1 { margin:0 0 8px; } p { color:var(--muted); line-height:1.5; }
+    label { display:block; margin:14px 0 6px; font-weight:700; font-size:13px; }
+    input, select { width:100%; min-height:44px; border-radius:10px; border:1px solid var(--border); background:#0a1018; color:var(--text); padding:0 12px; }
+    button { margin-top:18px; width:100%; min-height:46px; border:0; border-radius:10px; background:var(--accent); color:#061009; font-weight:900; cursor:pointer; }
+    .msg { margin-top:12px; color:var(--danger); min-height:20px; }
+    .ok { color:var(--accent); }
+    .row { display:grid; gap:12px; grid-template-columns:1fr 1fr; }
+    @media (max-width:640px){ .row{grid-template-columns:1fr;} }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Finish MineBox setup</h1>
+    <p>Replace shipped credentials. This works over the MineBox hotspot without internet. Worlds are not erased.</p>
+    <div class="row">
+      <div>
+        <label for="device_name">Device name</label>
+        <input id="device_name" value="MineBox" maxlength="64">
+      </div>
+      <div>
+        <label for="timezone">Timezone</label>
+        <input id="timezone" value="UTC" maxlength="64">
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label for="hotspot_ssid">Hotspot SSID</label>
+        <input id="hotspot_ssid" value="MineBox-Setup" maxlength="32">
+      </div>
+      <div>
+        <label for="hotspot_psk">New hotspot password</label>
+        <input id="hotspot_psk" type="password" minlength="8" maxlength="63" required>
+      </div>
+    </div>
+    <label for="os_password">New Linux <code>minebox</code> password (or leave blank to defer)</label>
+    <input id="os_password" type="password" minlength="12" maxlength="200" placeholder="Optional if deferred">
+    <label><input id="eula" type="checkbox"> I accept the Minecraft EULA</label>
+    <label><input id="rotate_rcon" type="checkbox" checked> Rotate RCON password</label>
+    <button id="save" type="button">Save credentials</button>
+    <button id="complete" type="button">Complete first-boot</button>
+    <div class="msg" id="msg"></div>
+    <p><a href="/setup" style="color:var(--accent)">Minecraft server wizard</a> · <a href="/login" style="color:var(--muted)">Login</a></p>
+  </div>
+  <script src="/static/js/csrf.js"></script>
+  <script>
+    const msg = document.getElementById("msg");
+    async function loadStatus() {
+      const res = await fetch("/api/v1/first-boot/status", { credentials: "same-origin" });
+      const data = await res.json();
+      if (data.csrf_token) window.MINEBOX_CSRF_TOKEN = data.csrf_token;
+      if (data.complete) window.location.replace("/");
+    }
+    document.getElementById("save").onclick = async () => {
+      msg.textContent = "";
+      const body = {
+        device_name: device_name.value,
+        timezone: timezone.value,
+        hotspot_ssid: hotspot_ssid.value,
+        hotspot_psk: hotspot_psk.value,
+        os_password: os_password.value || null,
+        rotate_rcon: rotate_rcon.checked,
+        eula_accepted: eula.checked,
+      };
+      const res = await fetch("/api/v1/first-boot/credentials", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) { msg.textContent = data.detail || "Failed"; return; }
+      msg.className = "msg ok";
+      msg.textContent = "Credentials saved. Click Complete first-boot when Minecraft setup is done.";
+    };
+    document.getElementById("complete").onclick = async () => {
+      msg.textContent = "";
+      const res = await fetch("/api/v1/first-boot/complete", {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      const data = await res.json();
+      if (!res.ok) { msg.className = "msg"; msg.textContent = data.detail || "Not complete"; return; }
+      window.location.replace("/");
+    };
+    loadStatus();
+  </script>
+</body>
+</html>

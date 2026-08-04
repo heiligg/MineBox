@@ -1,0 +1,29 @@
+[Unit]
+Description=MineBox Automatic Network Guard
+Documentation=http://minebox.local
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/opt/minebox
+
+Environment=PYTHONPATH=/opt/minebox
+Environment=MINEBOX_NETWORK_CHECK_INTERVAL=15
+Environment=MINEBOX_NETWORK_STARTUP_GRACE=45
+EnvironmentFile=-/etc/minebox/network.conf
+
+ExecStart=/usr/bin/python3 /opt/minebox/services/network_guard.py
+
+Restart=always
+RestartSec=5
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+
+[Install]
+WantedBy=multi-user.target

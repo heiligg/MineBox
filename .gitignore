@@ -5,3 +5,6 @@ build/
 *.tmp
 __pycache__/
 .vscode/MineBox-OS-Builder-v0.2.zip
+MineBox-OS-Builder-v0.2/.test-runtime/
+**/secrets.env
+!MineBox-OS-Builder-v0.2/config/secrets.example.env

@@ -1,0 +1,11 @@
+[Unit]
+Description=MineBox first-boot initialization
+ConditionPathExists=!/var/lib/minebox/firstboot-complete
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/minebox-firstboot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

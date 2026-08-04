@@ -1,0 +1,21 @@
+{
+  "generated_at": "2026-08-03T21:57:26Z",
+  "blocker_findings": [],
+  "documented": [
+    {
+      "item": "bootstrap hotspot PSK in hostapd templates",
+      "class": "DOCUMENTED_LIMITATION"
+    },
+    {
+      "item": "FIRST_USER_PASS in minebox-pi5.conf",
+      "class": "DOCUMENTED_LIMITATION"
+    },
+    {
+      "item": "LEGACY_HARDCODED_RCON migration marker",
+      "class": "SAFE_TO_KEEP"
+    }
+  ],
+  "openapi_default": "disabled",
+  "mock_hardware_forced_in_api": false,
+  "ok": true
+}

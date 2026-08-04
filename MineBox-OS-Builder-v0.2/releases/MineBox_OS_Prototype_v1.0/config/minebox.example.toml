@@ -1,0 +1,79 @@
+# MineBox non-secret configuration (example)
+# Appliance path: /etc/minebox/minebox.toml
+# Copy this file and edit. Do not put passwords or PSKs here.
+
+[device]
+name = "MineBox"
+hostname = "minebox"
+
+[api]
+# Dashboard / FastAPI bind
+bind_address = "0.0.0.0"
+port = 8080
+
+[dashboard]
+bind_address = "0.0.0.0"
+port = 8080
+
+[minecraft]
+data_path = "/opt/minecraft"
+java_path = "java"
+default_memory_gb = 4
+service_name = "minecraft.service"
+# Officially supported in Prototype v1: vanilla, paper
+# Experimental (preserved): fabric, forge, neoforge
+supported_providers = ["vanilla", "paper"]
+experimental_providers = ["fabric", "forge", "neoforge"]
+
+[network]
+hotspot_ssid = "MineBox-Setup"
+hotspot_subnet = "192.168.4.0/24"
+hotspot_address = "192.168.4.1"
+# Role hints: prefer_usb_wifi | prefer_onboard_wifi | iface:<name>
+# Actual assignment uses MAC/USB/sysfs identity; see docs/v1/Interface_Roles.md
+hotspot_interface_role = "prefer_onboard_wifi"
+client_interface_role = "prefer_remaining_wifi_or_ethernet"
+# Optional NAT when a valid uplink exists. SoftAP must work without uplink.
+# When false, hotspot stays local-only even if Ethernet/Wi-Fi uplink is up.
+internet_sharing = true
+
+[remote_access]
+# Tailscale is optional and disabled until explicitly enabled in the dashboard.
+provider = "tailscale"
+enabled = false
+expose_dashboard = false
+expose_minecraft = false
+
+[display]
+# curses = recovery/fallback UI on tty1
+# graphical = Chromium kiosk at http://127.0.0.1:8080/display (Checkpoint 5)
+mode = "graphical"
+width = 800
+height = 480
+fallback = "curses"
+idle_return_seconds = 120
+
+[hardware]
+# Profile name: raspberry_pi5 | mock | cm5
+profile = "raspberry_pi5"
+# Separate file recommended on appliance: /etc/minebox/hardware.toml
+profile_file = "/etc/minebox/hardware.toml"
+
+[backup]
+directory = "/opt/minecraft/backups"
+retention_count = 10
+# Never silently delete the only valid backup (enforced in backup service).
+preserve_last_backup = true
+
+[updates]
+channel = "stable"
+# Prototype updater limitations are documented in docs/v1/Known_Limitations.md
+
+[logging]
+level = "INFO"
+directory = "/var/log/minebox"
+
+[paths]
+runtime_state = "/var/lib/minebox"
+config_dir = "/etc/minebox"
+secrets_file = "/etc/minebox/secrets.env"
