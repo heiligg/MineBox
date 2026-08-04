@@ -1,20 +1,9 @@
 name: Build MineBox OS Image
 
+# Reusable / manual only. Auto image builds on main use build-minebox-image.yml
+# (draft release publish) to avoid duplicate 2h builds and Actions artifact quota.
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - ".github/workflows/build-image.yml"
-      - ".github/scripts/**"
-      - "MineBox-OS-Builder-v0.2/build.sh"
-      - "MineBox-OS-Builder-v0.2/check-project.sh"
-      - "MineBox-OS-Builder-v0.2/config/minebox-pi5.conf"
-      - "MineBox-OS-Builder-v0.2/pi-gen/**"
-      - "MineBox-OS-Builder-v0.2/app/**"
-      - "MineBox-OS-Builder-v0.2/requirements.txt"
-      - "MineBox-OS-Builder-v0.2/VERSION"
   workflow_call:
     outputs:
       minebox_version:

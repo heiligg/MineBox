@@ -127,10 +127,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          XZ="$(ls -1t "${BUILDER}/output"/*.img.xz | head -n1)"
-          test -f "$XZ"
           STABLE="${BUILDER}/output/MineBox_OS_Prototype_v1.0_RPi5.img.xz"
-          cp -f "$XZ" "$STABLE"
+          # Postprocess may already have created the stable name; avoid cp onto itself.
+          if [ ! -f "$STABLE" ]; then
+            XZ="$(ls -1t "${BUILDER}/output"/*.img.xz | head -n1)"
+            test -f "$XZ"
+            cp -f "$XZ" "$STABLE"
+          fi
+          test -f "$STABLE"
           test -f "${BUILDER}/output/SHA256SUMS"
 
           # Create or reuse mutable draft release tag (not a product version release).
