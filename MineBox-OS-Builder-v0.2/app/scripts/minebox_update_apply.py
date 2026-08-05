@@ -1064,7 +1064,9 @@ def apply_update(dev: bool) -> int:
         requirements = target / "requirements.txt"
         if requirements.is_file() and not dev:
             log(log_file, "Installing Python requirements.")
-            run(
+            # Do not fail the whole OTA if an optional package (e.g. smbus2) cannot
+            # install — dashboard must come back. Match install.sh soft behavior.
+            pip_result = subprocess.run(
                 [
                     "pip3",
                     "install",
@@ -1072,8 +1074,18 @@ def apply_update(dev: bool) -> int:
                     "-r",
                     str(requirements),
                 ],
+                check=False,
+                capture_output=True,
+                text=True,
                 timeout=900,
             )
+            if pip_result.returncode != 0:
+                detail = (pip_result.stderr or pip_result.stdout or "").strip()
+                log(
+                    log_file,
+                    "WARNING: pip install reported errors (continuing): "
+                    + detail[:2000],
+                )
 
         install_systemd_units(target, dev)
         install_minecraft_permissions(target, dev)
@@ -1083,7 +1095,8 @@ def apply_update(dev: bool) -> int:
             "MINEBOX_HEALTH_URL",
             "http://127.0.0.1:8080/api/v1/health",
         )
-        if not dev and not healthy(health_url):
+        # Allow extra time after pip + systemd restart.
+        if not dev and not healthy(health_url, timeout=120):
             raise RuntimeError("The updated dashboard failed its health check.")
 
         write_commit(commit_file, new_commit)

@@ -260,7 +260,7 @@ def parse_hardware(data: Mapping[str, Any], *, source: str = "") -> HardwareConf
     left_btn = _parse_button(left or left_defaults, "left", left_defaults)
     right_btn = _parse_button(right or right_defaults, "right", right_defaults)
 
-    encoder_enabled = _optional_bool(encoder, "enabled", True)
+    encoder_enabled = _optional_bool(encoder, "enabled", False)
     encoder_type = _optional_str(encoder, "type", "adafruit_seesaw").lower()
     if encoder_type not in {"adafruit_seesaw", "none", "mock"}:
         raise ConfigError("[encoder] type must be adafruit_seesaw, none, or mock.")
