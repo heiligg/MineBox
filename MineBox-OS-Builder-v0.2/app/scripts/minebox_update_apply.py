@@ -922,6 +922,26 @@ def restart_api(dev: bool) -> None:
     run(["systemctl", "restart", "minebox-api.service"], timeout=120)
 
 
+def ensure_api_running(dev: bool, log_file: Path | None = None) -> None:
+    """Best-effort: never leave the dashboard permanently stopped after OTA."""
+    if dev:
+        return
+    try:
+        soft_systemctl(["start", "minebox-api.service"], timeout=120)
+        active = subprocess.run(
+            ["systemctl", "is-active", "minebox-api.service"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        if (active.stdout or "").strip() != "active":
+            soft_systemctl(["restart", "minebox-api.service"], timeout=120)
+    except Exception as exc:  # noqa: BLE001
+        if log_file is not None:
+            log(log_file, f"WARNING: could not ensure minebox-api is running: {exc}")
+
+
 def stop_api(dev: bool) -> None:
     if dev:
         return
@@ -953,6 +973,7 @@ def apply_update(dev: bool) -> int:
 
     swapped = False
     new_commit = None
+    api_stopped = False
 
     try:
         status(
@@ -1019,6 +1040,7 @@ def apply_update(dev: bool) -> int:
         log(log_file, f"Installing update into {target}.")
 
         stop_api(dev)
+        api_stopped = True
 
         if target.exists() or target.is_symlink():
             safe_remove(previous)
@@ -1064,33 +1086,36 @@ def apply_update(dev: bool) -> int:
         requirements = target / "requirements.txt"
         if requirements.is_file() and not dev:
             log(log_file, "Installing Python requirements.")
-            # Do not fail the whole OTA if an optional package (e.g. smbus2) cannot
-            # install — dashboard must come back. Match install.sh soft behavior.
-            pip_result = subprocess.run(
-                [
-                    "pip3",
-                    "install",
-                    "--break-system-packages",
-                    "-r",
-                    str(requirements),
-                ],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=900,
-            )
-            if pip_result.returncode != 0:
-                detail = (pip_result.stderr or pip_result.stdout or "").strip()
-                log(
-                    log_file,
-                    "WARNING: pip install reported errors (continuing): "
-                    + detail[:2000],
+            # Soft-fail: never brick the dashboard over an optional pip package.
+            try:
+                pip_result = subprocess.run(
+                    [
+                        "pip3",
+                        "install",
+                        "--break-system-packages",
+                        "-r",
+                        str(requirements),
+                    ],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=900,
                 )
+                if pip_result.returncode != 0:
+                    detail = (pip_result.stderr or pip_result.stdout or "").strip()
+                    log(
+                        log_file,
+                        "WARNING: pip install reported errors (continuing): "
+                        + detail[:2000],
+                    )
+            except Exception as pip_exc:  # noqa: BLE001
+                log(log_file, f"WARNING: pip install skipped after error: {pip_exc}")
 
         install_systemd_units(target, dev)
         install_minecraft_permissions(target, dev)
         install_hotspot_helpers(target, dev)
         restart_api(dev)
+        api_stopped = False
         health_url = os.environ.get(
             "MINEBOX_HEALTH_URL",
             "http://127.0.0.1:8080/api/v1/health",
@@ -1126,11 +1151,13 @@ def apply_update(dev: bool) -> int:
                     target.replace(failed)
                 previous.replace(target)
                 restart_api(dev)
+                api_stopped = False
                 rollback_ok = healthy(
                     os.environ.get(
                         "MINEBOX_HEALTH_URL",
                         "http://127.0.0.1:8080/api/v1/health",
-                    )
+                    ),
+                    timeout=120,
                 )
                 status(
                     status_file,
@@ -1164,6 +1191,11 @@ def apply_update(dev: bool) -> int:
                 rollback_succeeded=None,
             )
         return 1
+    finally:
+        # Critical: never leave minebox-api stopped after an update attempt.
+        if api_stopped:
+            log(log_file, "Ensuring minebox-api is started after update attempt.")
+        ensure_api_running(dev, log_file)
 
 
 def main() -> int:

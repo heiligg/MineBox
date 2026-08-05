@@ -139,6 +139,12 @@ rsync -a --delete \
   "$CUSTOM_STAGE/00-install-minebox/files/minebox/"
 install -m 0644 "$ROOT_DIR/requirements.txt" \
   "$CUSTOM_STAGE/00-install-minebox/files/minebox/requirements.txt"
+# Seed example configs into the image app tree for first-boot /etc install.
+mkdir -p "$CUSTOM_STAGE/00-install-minebox/files/minebox/config"
+install -m 0644 "$ROOT_DIR/config/minebox.example.toml" \
+  "$CUSTOM_STAGE/00-install-minebox/files/minebox/config/minebox.example.toml"
+install -m 0644 "$ROOT_DIR/config/hardware.example.toml" \
+  "$CUSTOM_STAGE/00-install-minebox/files/minebox/config/hardware.example.toml"
 
 # Catch Python syntax errors after the exact application payload has been staged.
 python3 -m compileall -q "$CUSTOM_STAGE/00-install-minebox/files/minebox"

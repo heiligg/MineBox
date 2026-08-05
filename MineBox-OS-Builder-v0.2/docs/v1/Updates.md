@@ -62,7 +62,16 @@ Idempotent; preserves user data.
 
 If apply swaps trees, previous may remain at `/opt/minebox.previous` (when used). Restore by swapping directories and restarting `minebox-api`. Worlds are not stored under `/opt/minebox`.
 
-## Limits
+## Dashboard safety
+
+The updater **briefly stops** `minebox-api` while swapping `/opt/minebox` — the web UI will disconnect for a minute or two. That is normal.
+
+Guarantees in current apply script:
+
+- Download/validate **before** stopping the API
+- `pip install` failures are **warnings**, not hard failures
+- On any failure after swap, rollback to `/opt/minebox.previous` when present
+- A `finally` path always tries to **start** `minebox-api` so the dashboard is not left dead
 
 - Not signed binary releases
 - Network required for Git fetch

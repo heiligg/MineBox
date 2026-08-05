@@ -25,7 +25,10 @@ setfacl -R -m u:minebox:rwX,u:minecraft:rwX,g:minebox:rwX,m::rwX /opt/minecraft
 setfacl -R -d -m u:minebox:rwX,u:minecraft:rwX,g:minebox:rwX,m::rwX /opt/minecraft
 
 if [ -f /opt/minebox/requirements.txt ]; then
-    pip3 install --break-system-packages -r /opt/minebox/requirements.txt
+    # Soft-fail: image build must not die on an optional pip package.
+    pip3 install --break-system-packages -r /opt/minebox/requirements.txt \
+      || pip3 install -r /opt/minebox/requirements.txt \
+      || echo "WARNING: pip requirements install had errors (continuing)"
 fi
 
 install -m 0644 /opt/minebox/services/minebox-api.service /etc/systemd/system/minebox-api.service
@@ -83,6 +86,16 @@ if [ ! -f /etc/minebox/minebox.toml ]; then
     /opt/minebox/../config/minebox.example.toml; do
     if [ -f "$cand" ]; then
       install -m 0644 "$cand" /etc/minebox/minebox.toml
+      break
+    fi
+  done
+fi
+if [ ! -f /etc/minebox/hardware.toml ]; then
+  for cand in \
+    /opt/minebox/config/hardware.example.toml \
+    /opt/minebox/../config/hardware.example.toml; do
+    if [ -f "$cand" ]; then
+      install -m 0644 "$cand" /etc/minebox/hardware.toml
       break
     fi
   done
