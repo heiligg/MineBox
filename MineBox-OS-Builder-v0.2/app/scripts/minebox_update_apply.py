@@ -284,9 +284,34 @@ def git_env() -> dict[str, str]:
         env["GIT_SSH_COMMAND"] = (
             f"ssh -i {deploy_key} "
             "-o IdentitiesOnly=yes "
+            "-o StrictHostKeyChecking=accept-new "
             "-o BatchMode=yes"
         )
     return env
+
+
+def effective_repo_url(repo: str) -> str:
+    """Rewrite GitHub HTTPS → SSH when the MineBox deploy key is present."""
+    raw = (repo or "").strip()
+    deploy_key = Path(
+        os.environ.get(
+            "MINEBOX_UPDATE_DEPLOY_KEY",
+            "/home/minebox/.ssh/minebox_update",
+        )
+    )
+    if not raw or not deploy_key.is_file():
+        return raw
+    for prefix in (
+        "https://github.com/",
+        "http://github.com/",
+        "https://www.github.com/",
+    ):
+        if raw.lower().startswith(prefix):
+            path = raw[len(prefix) :].removesuffix(".git").strip("/")
+            if path:
+                return f"git@github.com:{path}.git"
+            break
+    return raw
 
 
 def paths(dev: bool) -> dict[str, Path]:
@@ -919,7 +944,7 @@ def apply_update(dev: bool) -> int:
     target = locations["target"]
     previous = locations["previous"]
 
-    repo = cfg("repo", DEFAULT_REPO)
+    repo = effective_repo_url(cfg("repo", DEFAULT_REPO))
     branch = cfg("branch", DEFAULT_BRANCH)
     configured_subdir = cfg("app_subdir", DEFAULT_APP_SUBDIR)
     old_commit = None

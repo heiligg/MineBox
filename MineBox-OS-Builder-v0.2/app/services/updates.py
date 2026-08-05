@@ -221,25 +221,57 @@ def _run(
         raise UpdateError(str(exc)) from exc
 
 
-def _git_environment() -> dict[str, str]:
-    env: dict[str, str] = {}
-    deploy_key = Path(
+def _deploy_key_path() -> Path:
+    return Path(
         os.environ.get(
             "MINEBOX_UPDATE_DEPLOY_KEY",
             "/home/minebox/.ssh/minebox_update",
         )
     )
+
+
+def _git_environment() -> dict[str, str]:
+    env: dict[str, str] = {}
+    deploy_key = _deploy_key_path()
     if deploy_key.is_file():
         env["GIT_SSH_COMMAND"] = (
             f"ssh -i {deploy_key} "
             "-o IdentitiesOnly=yes "
+            "-o StrictHostKeyChecking=accept-new "
             "-o BatchMode=yes"
         )
     return env
 
 
+def _effective_repository_url(url: str | None = None) -> str:
+    """Use SSH when a deploy key exists so private HTTPS remotes can authenticate.
+
+    Default config uses https://github.com/... but GIT_SSH_COMMAND only applies to
+    SSH remotes. Rewrite GitHub HTTPS → SSH when /home/minebox/.ssh/minebox_update
+    is present.
+    """
+    raw = (url or repository_url()).strip()
+    if not raw:
+        return raw
+    deploy_key = _deploy_key_path()
+    if not deploy_key.is_file():
+        return raw
+    prefixes = (
+        "https://github.com/",
+        "http://github.com/",
+        "https://www.github.com/",
+    )
+    for prefix in prefixes:
+        if raw.lower().startswith(prefix):
+            path = raw[len(prefix) :].removesuffix(".git").strip("/")
+            if path:
+                return f"git@github.com:{path}.git"
+            break
+    return raw
+
+
 def remote_commit() -> str | None:
-    url = repository_url()
+    url = _effective_repository_url()
     branch = update_branch()
     if not url or not branch:
         return None
@@ -254,7 +286,8 @@ def remote_commit() -> str | None:
             timeout=60,
             env=_git_environment(),
         )
-    except UpdateError:
+    except UpdateError as exc:
+        _append_log(f"remote_commit failed for {url}: {exc}")
         return None
 
     for line in result.stdout.splitlines():
@@ -340,18 +373,28 @@ def status() -> dict[str, Any]:
 
 def check_for_updates() -> dict[str, Any]:
     url = repository_url()
+    effective = _effective_repository_url(url)
     branch = update_branch()
     if not url:
         raise UpdateError("No GitHub repository URL is configured for updates.")
     if not branch:
         raise UpdateError("No update branch is configured.")
 
-    _append_log(f"Checking {url} ({branch}) for updates.")
+    _append_log(f"Checking {effective} ({branch}) for updates.")
     latest = remote_commit()
     if not latest:
+        deploy = _deploy_key_path()
+        if not deploy.is_file():
+            raise UpdateError(
+                "Latest commit unavailable: the MineBox GitHub repo is private and "
+                f"no deploy key was found at {deploy}. "
+                "On the Pi: create an SSH key, add it as a GitHub deploy key "
+                "(repo Settings → Deploy keys, read-only), then check again."
+            )
         raise UpdateError(
-            "Could not reach the MineBox GitHub repository. "
-            "Check network access and the configured repo URL."
+            "Latest commit unavailable: git could not read the private repository. "
+            f"Tried {effective} with deploy key {deploy}. "
+            "Confirm that key is added under GitHub → Settings → Deploy keys."
         )
 
     result = status()
@@ -362,6 +405,7 @@ def check_for_updates() -> dict[str, Any]:
         or result["current_commit"] != latest
     )
     result["repository_available"] = True
+    result["repository_url_effective"] = effective
     result["message"] = (
         "A MineBox update is available."
         if result["update_available"]
