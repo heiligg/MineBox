@@ -14,9 +14,9 @@ table inet minebox_filter {
         ct state invalid drop
         ip protocol icmp icmp type echo-request limit rate 5/second accept
 
-        # Hotspot clients: DHCP, DNS, captive/dashboard, Minecraft
+        # Hotspot clients: DHCP, DNS, captive/dashboard, Minecraft, SSH (bring-up)
         iifname "wlan0" udp dport { 53, 67 } accept
-        iifname "wlan0" tcp dport { 53, 80, 8080, 25565 } accept
+        iifname "wlan0" tcp dport { 53, 80, 8080, 25565, 22 } accept
 
         # Trusted LAN (non-hotspot, non-tailscale): dashboard + Minecraft
         iifname != "wlan0" iifname != "lo" iifname != "tailscale0" tcp dport { 80, 8080, 25565 } accept
@@ -24,7 +24,7 @@ table inet minebox_filter {
         # Tailscale: ports allowed at firewall; app-level expose_* toggles still required
         iifname "tailscale0" tcp dport { 80, 8080, 25565 } accept
 
-        # RCON and SSH are not publicly exposed by default
+        # RCON never public; SSH still dropped from non-hotspot paths
         tcp dport { 25575, 22 } drop
         tcp dport { 80, 8080 } drop
     }

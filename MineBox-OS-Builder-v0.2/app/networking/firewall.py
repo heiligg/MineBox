@@ -175,10 +175,11 @@ def internet_sharing_enabled() -> bool:
 
 def build_policy_for_roles(hotspot_iface: str | None, *, has_uplink: bool) -> dict[str, Any]:
     sharing = internet_sharing_enabled() and has_uplink and bool(hotspot_iface)
+    # SoftAP bring-up: allow SSH on the hotspot iface only (still dropped from WAN/LAN).
     text = generate_nftables(
         hotspot_iface=hotspot_iface or "wlan0",
         internet_sharing=sharing,
-        allow_ssh_on_hotspot=False,
+        allow_ssh_on_hotspot=True,
         allow_ssh_on_lan=False,
     )
     check = validate_nftables_text(text)

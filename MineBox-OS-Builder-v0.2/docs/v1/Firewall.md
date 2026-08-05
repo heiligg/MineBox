@@ -8,9 +8,9 @@
 
 - `input` / `forward`: **policy drop**
 - `lo` accepted
-- Hotspot iface: DHCP/DNS/HTTP/dashboard/Minecraft
+- Hotspot iface: DHCP/DNS/HTTP/dashboard/Minecraft/**SSH (SoftAP bring-up only)**
 - Trusted LAN (non-hotspot, non-`tailscale0`): dashboard + Minecraft by default
-- SSH and RCON (**25575**) dropped by default
+- SSH from WAN/LAN and RCON (**25575**) dropped by default
 - Tailscale iface may pass ports; **app expose flags** still required for intended use
 - Forward: only hotspot→uplink when internet sharing is active; established/related back
 
