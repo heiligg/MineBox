@@ -6,20 +6,27 @@ Version `1.0.0-prototype.1`. Prototype appliance — not mass-production.
 
 When graphical mode is enabled, the front panel shows MineBox Home with large status text.
 
-**Navigate:** turn the knob (or use short left/right buttons) to move the gold focus box.  
-**Select:** press the knob (or hold the right button).  
-**Back:** hold the knob (or hold the left button).
+**Navigate:** turn the rotary encoder clockwise/counter-clockwise to move the gold focus box.  
+**Select:** press the encoder knob.  
+**Back:** short-press the left button.  
+**Home:** hold the left button.  
+**Context:** short-press the right button (opens System).  
+**Power menu:** hold the right button.
+
+If the encoder is unplugged, short left/right buttons temporarily move the focus again (fallback).
 
 ### Common tasks
 
 - **Start/stop Minecraft** — Home → Server → Start / Stop (confirm Stop/Restart)  
 - **Backup** — Home → Backups → Create backup (restore is done in the web dashboard)  
 - **Network info** — Home → Network (hotspot password is never shown)  
-- **Shut down** — Home → Power → Shut down → Confirm  
+- **Shut down** — Home → Power → Shut down → Confirm (or hold Right for Power)
 
 ### First boot
 
 If the panel says **Setup required**, join Wi‑Fi **MineBox-Setup** and open **http://192.168.4.1** on a phone/laptop to finish setup. Server controls stay locked until setup completes.
+
+Missing encoder at first boot only warns and falls back to two-button navigation — setup still works.
 
 ### If the panel cannot reach the backend
 
@@ -31,4 +38,4 @@ On the same network: `http://<minebox-ip>:8080` (or SoftAP `http://192.168.4.1`)
 
 ### Encoder note
 
-Until hardware pinout is verified, encoder navigation is provided by mock/dev keyboard mappings on developer machines; physical encoder wiring is not invented in software.
+Hardware Revision D uses the **Adafruit Seesaw rotary encoder (Product 5880)** over I²C as the primary control. See `Encoder.md` and `Hardware_Controls.md` for wiring and behavior.

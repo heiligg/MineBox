@@ -31,7 +31,9 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(cfg.hardware.left_button.gpio_bcm, 23)
         self.assertEqual(cfg.hardware.right_button.gpio_bcm, 17)
         self.assertEqual(cfg.hardware.verification, "UNVERIFIED_AGAINST_PCB")
-        self.assertEqual(cfg.hardware.encoder_status, "NOT_CONFIGURED")
+        self.assertEqual(cfg.hardware.encoder_status, "OK")
+        self.assertEqual(cfg.hardware.encoder_type, "adafruit_seesaw")
+        self.assertEqual(cfg.hardware.encoder_address, 0x36)
         self.assertEqual(cfg.hardware.left_led_status, "NOT_CONFIGURED")
         self.assertEqual(cfg.hardware.fan_status, "NOT_CONFIGURED")
 

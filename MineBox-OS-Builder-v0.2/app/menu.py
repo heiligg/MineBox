@@ -25,7 +25,7 @@ class MineBoxApp:
         self._start_gpio_buttons()
 
     def _start_gpio_buttons(self) -> None:
-        """Short L/R navigate; hold L=back; hold R=confirm (encoder stand-in)."""
+        """Short L/R navigate when encoder missing; Rev D secondary otherwise."""
         self._input_timeout_ms = -1
         try:
             from gpio_buttons import start_buttons
@@ -118,12 +118,20 @@ class MineBoxApp:
 
     @staticmethod
     def is_back(key: int) -> bool:
-        # Left arrow represents the future physical Left/Back button.
+        # Left short = Back (Rev D).
         return key in (curses.KEY_LEFT, 27, curses.KEY_BACKSPACE, 127)
 
     @staticmethod
+    def is_home(key: int) -> bool:
+        return key == curses.KEY_HOME
+
+    @staticmethod
+    def is_power(key: int) -> bool:
+        return key == curses.KEY_END
+
+    @staticmethod
     def is_quick(key: int) -> bool:
-        # Right arrow represents the future physical Right/Quick button.
+        # Right short = Context / quick actions (Rev D).
         return key == curses.KEY_RIGHT
 
     def quick_actions(self) -> None:
@@ -170,15 +178,21 @@ class MineBoxApp:
                 elif line.startswith("WARNING:"): attr = self.color_warn
                 self.safe(row, 2, line, attr); row += 1
             self.footer(
-                "Tap R: Menu | Hold L: Exit | In menus: Tap L/R move, Hold R select"
+                "Encoder: move/select | L: Back/Home | R: Context/Power"
             )
             self.screen.refresh(); key = self.get_key()
-            # Short L/R (encoder stand-in): enter the menu. Hold R is confirm
-            # only inside menus — do not open the menu on a long right press.
+            # Fallback two-button nav uses UP/DOWN; Rev D uses encoder + secondary buttons.
             if key in (curses.KEY_UP, curses.KEY_DOWN):
                 self.set_input_timeout(-1)
                 return "menu"
-            if self.is_quick(key):
+            if self.is_home(key):
+                # Already on dashboard.
+                continue
+            if self.is_power(key):
+                self.set_input_timeout(-1)
+                self.power_menu()
+                self.set_input_timeout(int(self.settings.get("refresh_seconds", 2) * 1000))
+            elif self.is_quick(key):
                 self.set_input_timeout(-1); self.quick_actions(); self.set_input_timeout(int(self.settings.get("refresh_seconds", 2) * 1000))
             elif self.is_back(key):
                 if self.confirm("Exit MineBox UI?", ["Minecraft will keep running."], "Exit UI"):
@@ -186,7 +200,7 @@ class MineBoxApp:
                 self.set_input_timeout(int(self.settings.get("refresh_seconds", 2) * 1000))
         return "exit"
 
-    def menu(self, title: str, items: list[tuple[str, Action]], footer: str = "Tap L/R: Move | Hold R: Select | Hold L: Back") -> None:
+    def menu(self, title: str, items: list[tuple[str, Action]], footer: str = "Encoder/Arrows: Move | Enter: Select | L: Back | Home: Dashboard") -> None:
         selected = 0; self.set_input_timeout(-1)
         while self.running:
             row = self.title(title)
@@ -199,6 +213,10 @@ class MineBoxApp:
                 action = items[selected][1]
                 if action is None: return
                 action()
+            elif self.is_home(key):
+                return
+            elif self.is_power(key):
+                self.power_menu()
             elif self.is_quick(key) and title != "Quick Actions": self.quick_actions()
             elif self.is_back(key): return
 

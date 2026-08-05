@@ -64,14 +64,16 @@ class HardwareTests(unittest.TestCase):
         self.assertTrue(hw.pop_events())
         self.assertIn(action, {PressAction.NONE, PressAction.SHORT})
 
-    def test_unresolved_encoder_led_fan(self) -> None:
+    def test_unresolved_led_fan_encoder_capability(self) -> None:
         hw = MockHardware(self.cfg)
+        # Encoder enabled in Rev D example — mock presents as available.
+        self.assertTrue(hw.encoder_available())
         self.assertEqual(hw.read_encoder_delta(), 0)
         self.assertEqual(hw.set_left_led(True), FeatureStatus.NOT_CONFIGURED)
         self.assertEqual(hw.set_right_led(True), FeatureStatus.NOT_CONFIGURED)
         self.assertEqual(hw.set_fan(FanState.ON), FeatureStatus.NOT_CONFIGURED)
         caps = hw.capabilities()
-        self.assertEqual(caps["encoder"], "NOT_CONFIGURED")
+        self.assertEqual(caps["encoder"], "OK")
         self.assertEqual(caps["left_led"], "NOT_CONFIGURED")
         self.assertEqual(caps["fan"], "NOT_CONFIGURED")
 

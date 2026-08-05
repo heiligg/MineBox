@@ -5,3 +5,4 @@ python-multipart>=0.0.20,<1.0
 psutil>=6.0,<8.0
 itsdangerous>=2.2,<3.0
 argon2-cffi>=23.1,<26.0
+smbus2>=0.4,<1.0

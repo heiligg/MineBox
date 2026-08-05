@@ -1,7 +1,8 @@
 """Raspberry Pi 5 hardware profile.
 
 Button BCM numbers come only from HardwareConfig (provisional until PCB verified).
-Encoder / LED / fan GPIO are NOT invented — report NOT_CONFIGURED.
+Hardware Rev D: Adafruit Seesaw encoder (Product 5880) over I²C.
+LED / fan GPIO remain NOT_CONFIGURED until PCB pinout is verified.
 """
 
 from __future__ import annotations
@@ -27,8 +28,12 @@ class RaspberryPi5Hardware:
         self._right_btn = None
         self._gpio_available = False
         self._gpio_error: str | None = None
+        self._encoder = None
+        self._encoder_warn_logged = False
         self._events: list[InputEvent] = []
+        self._cached_press = False
         self._init_gpio()
+        self._init_encoder()
 
     def _init_gpio(self) -> None:
         try:
@@ -40,7 +45,6 @@ class RaspberryPi5Hardware:
 
         pull_up = self.config.pull == "up"
         try:
-            # bounce_time=None: debounce handled in higher layers / gpio_buttons.
             self._left_btn = Button(
                 self.config.left_button.gpio_bcm,
                 pull_up=pull_up,
@@ -64,6 +68,36 @@ class RaspberryPi5Hardware:
             LOGGER.warning(self._gpio_error)
             self._close_buttons()
 
+    def _init_encoder(self) -> None:
+        if not self.config.encoder_enabled:
+            return
+        if self.config.encoder_type not in {"adafruit_seesaw", "mock"}:
+            return
+        try:
+            from hardware.seesaw_encoder import SeesawEncoderConfig, SeesawEncoderDriver
+
+            self._encoder = SeesawEncoderDriver(
+                SeesawEncoderConfig(
+                    i2c_bus=self.config.encoder_i2c_bus,
+                    address=self.config.encoder_address,
+                    interrupt_gpio=self.config.encoder_interrupt_gpio,
+                    rotation_step=self.config.encoder_rotation_step,
+                    debounce_ms=self.config.encoder_debounce_ms,
+                    long_press_ms=self.config.encoder_long_press_ms,
+                )
+            )
+            if not self._encoder.connected and not self._encoder_warn_logged:
+                self._encoder_warn_logged = True
+                LOGGER.warning(
+                    "Seesaw encoder not detected at boot (bus=%s addr=0x%02X). "
+                    "Falling back to two-button navigation; boot continues.",
+                    self.config.encoder_i2c_bus,
+                    self.config.encoder_address,
+                )
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("Encoder init failed (boot continues): %s", exc)
+            self._encoder = None
+
     def _close_buttons(self) -> None:
         for btn in (self._left_btn, self._right_btn):
             if btn is not None:
@@ -74,6 +108,14 @@ class RaspberryPi5Hardware:
         self._left_btn = None
         self._right_btn = None
         self._gpio_available = False
+
+    def encoder_available(self) -> bool:
+        if self._encoder is None:
+            return False
+        try:
+            return bool(self._encoder.connected)
+        except Exception:
+            return False
 
     def read_left_button(self) -> bool:
         if not self._gpio_available or self._left_btn is None:
@@ -94,10 +136,23 @@ class RaspberryPi5Hardware:
         return pressed
 
     def read_encoder_delta(self) -> int:
-        return 0
+        if self._encoder is None:
+            return 0
+        try:
+            delta, pressed = self._encoder.poll()
+            self._cached_press = pressed
+            return int(delta)
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.debug("encoder delta read failed: %s", exc)
+            return 0
 
     def read_encoder_press(self) -> bool:
-        return False
+        if self._encoder is None:
+            return False
+        try:
+            return bool(self._encoder.read_press())
+        except Exception:
+            return bool(self._cached_press)
 
     def set_left_led(self, on: bool) -> FeatureStatus:
         _ = on
@@ -125,7 +180,6 @@ class RaspberryPi5Hardware:
 
     def get_fan_state(self) -> FanState:
         if self.config.fan_mode == "platform":
-            # Platform firmware cooler — report AUTO when temp readable.
             return FanState.AUTO if self.read_cpu_temperature_c() is not None else FanState.UNKNOWN
         if self.config.fan_status == "NOT_CONFIGURED":
             return FanState.NOT_CONFIGURED
@@ -177,10 +231,16 @@ class RaspberryPi5Hardware:
             if self._gpio_available
             else FeatureStatus.UNAVAILABLE.value
         )
+        if not self.config.encoder_enabled:
+            enc = self.config.encoder_status
+        elif self.encoder_available():
+            enc = FeatureStatus.OK.value
+        else:
+            enc = FeatureStatus.UNAVAILABLE.value
         return {
             "left_button": button_status,
             "right_button": button_status,
-            "encoder": self.config.encoder_status,
+            "encoder": enc,
             "left_led": self.config.left_led_status,
             "right_led": self.config.right_led_status,
             "fan": self.config.fan_status
@@ -203,28 +263,39 @@ class RaspberryPi5Hardware:
             "Button GPIOs are provisional (UNVERIFIED_AGAINST_PCB) until "
             "docs/v1/Hardware_Pinout.md is source-verified."
         )
-        if self.config.encoder_status == "NOT_CONFIGURED":
-            messages.append("Encoder pins NOT_CONFIGURED (Adafruit 5880).")
+        if self.config.encoder_enabled and not self.encoder_available():
+            messages.append(
+                "Seesaw encoder missing or disconnected — using two-button navigation fallback."
+            )
+        elif self.encoder_available():
+            messages.append("Seesaw encoder (Product 5880) active as primary navigation.")
         if self.config.left_led_status == "NOT_CONFIGURED":
             messages.append("Illuminated LEDs NOT_CONFIGURED.")
         if self.config.fan_status == "NOT_CONFIGURED":
             messages.append("Fan GPIO/PWM NOT_CONFIGURED; using platform cooling if available.")
         return HardwareHealth(
             profile=self.profile_name,
-            ok=True,  # backend must not fail when optional GPIO missing
+            ok=True,
             gpio_verification=self.config.verification,
             features=self.capabilities(),
             messages=messages,
         )
 
     def diagnostic_snapshot(self) -> dict[str, Any]:
+        enc_snap = None
+        if self._encoder is not None:
+            try:
+                enc_snap = self._encoder.diagnostic_snapshot()
+            except Exception as exc:  # noqa: BLE001
+                enc_snap = {"error": str(exc)}
         return {
             "profile": self.profile_name,
             "left_button": self.read_left_button() if self._gpio_available else None,
             "right_button": self.read_right_button() if self._gpio_available else None,
-            "encoder_press": None,
-            "encoder_delta": None,
-            "encoder_status": self.config.encoder_status,
+            "encoder_press": self.read_encoder_press() if self.encoder_available() else None,
+            "encoder_available": self.encoder_available(),
+            "encoder": enc_snap,
+            "encoder_status": self.capabilities().get("encoder"),
             "left_led_status": self.config.left_led_status,
             "right_led_status": self.config.right_led_status,
             "fan": self.get_fan_state().value,
@@ -236,6 +307,7 @@ class RaspberryPi5Hardware:
                 "left_bcm": self.config.left_button.gpio_bcm,
                 "right_bcm": self.config.right_button.gpio_bcm,
                 "verification": self.config.verification,
+                "encoder_interrupt_bcm": self.config.encoder_interrupt_gpio,
             },
             "capabilities": self.capabilities(),
         }
@@ -247,3 +319,9 @@ class RaspberryPi5Hardware:
 
     def close(self) -> None:
         self._close_buttons()
+        if self._encoder is not None:
+            try:
+                self._encoder.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._encoder = None

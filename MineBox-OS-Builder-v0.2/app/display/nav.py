@@ -63,6 +63,22 @@ class NavState:
                 self.screen = "home"
                 self.focus_index = 0
             return None
+        if intent == "home":
+            self.confirm_action = None
+            self.screen = "home"
+            self.focus_index = 0
+            return None
+        if intent == "context":
+            # No UI redesign: System is the appliance context/settings screen.
+            if self.screen != "system":
+                self.screen = "system"
+                self.focus_index = 0
+            return None
+        if intent == "power":
+            if self.screen != "power":
+                self.screen = "power"
+                self.focus_index = 0
+            return None
         if intent == "select":
             return self.focused
         return None

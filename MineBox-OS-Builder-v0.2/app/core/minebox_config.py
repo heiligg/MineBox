@@ -131,6 +131,13 @@ class HardwareConfig:
     right_button: ButtonConfig
     encoder_enabled: bool
     encoder_status: str
+    encoder_type: str
+    encoder_i2c_bus: int
+    encoder_address: int
+    encoder_interrupt_gpio: int | None
+    encoder_rotation_step: int
+    encoder_debounce_ms: int
+    encoder_long_press_ms: int
     encoder_gpio_a: int | None
     encoder_gpio_b: int | None
     encoder_gpio_button: int | None
@@ -197,8 +204,8 @@ def _parse_button(section: Mapping[str, Any], name: str, defaults: Mapping[str, 
     physical = data.get("physical_pin")
     if physical is not None and (not isinstance(physical, int) or isinstance(physical, bool)):
         raise ConfigError(f"[buttons.{name}] physical_pin must be an integer or omitted.")
-    short_action = _optional_str(data, "short_action", "nav_previous" if name == "left" else "nav_next")
-    long_action = _optional_str(data, "long_action", "back" if name == "left" else "confirm")
+    short_action = _optional_str(data, "short_action", "back" if name == "left" else "context")
+    long_action = _optional_str(data, "long_action", "home" if name == "left" else "power")
     return ButtonConfig(
         gpio_bcm=gpio,
         physical_pin=physical if isinstance(physical, int) else None,
@@ -246,13 +253,35 @@ def parse_hardware(data: Mapping[str, Any], *, source: str = "") -> HardwareConf
     lockout_ms = _optional_int(buttons, "lockout_ms", 150, min_v=0, max_v=2000)
     poll_ms = _optional_int(buttons, "poll_ms", 5, min_v=1, max_v=100)
 
-    left_defaults = {"gpio_bcm": 23, "physical_pin": 16, "short_action": "nav_previous", "long_action": "back"}
-    right_defaults = {"gpio_bcm": 17, "physical_pin": 11, "short_action": "nav_next", "long_action": "confirm"}
+    # Hardware Rev D defaults: buttons are secondary (Back/Home/Context/Power).
+    left_defaults = {"gpio_bcm": 23, "physical_pin": 16, "short_action": "back", "long_action": "home"}
+    right_defaults = {"gpio_bcm": 17, "physical_pin": 11, "short_action": "context", "long_action": "power"}
 
     left_btn = _parse_button(left or left_defaults, "left", left_defaults)
     right_btn = _parse_button(right or right_defaults, "right", right_defaults)
 
-    encoder_status = _optional_str(encoder, "status", "NOT_CONFIGURED").upper()
+    encoder_enabled = _optional_bool(encoder, "enabled", True)
+    encoder_type = _optional_str(encoder, "type", "adafruit_seesaw").lower()
+    if encoder_type not in {"adafruit_seesaw", "none", "mock"}:
+        raise ConfigError("[encoder] type must be adafruit_seesaw, none, or mock.")
+    encoder_status = _optional_str(
+        encoder,
+        "status",
+        "OK" if encoder_enabled and encoder_type == "adafruit_seesaw" else "NOT_CONFIGURED",
+    ).upper()
+    encoder_i2c_bus = _optional_int(encoder, "i2c_bus", 1, min_v=0, max_v=16)
+    if "address" in encoder and encoder["address"] is not None:
+        addr_val = encoder["address"]
+        if not isinstance(addr_val, int) or isinstance(addr_val, bool) or not (0x08 <= addr_val <= 0x77):
+            raise ConfigError("[encoder] address must be an I²C address integer (e.g. 0x36).")
+        encoder_address = addr_val
+    else:
+        encoder_address = 0x36
+    encoder_interrupt_gpio = _optional_gpio(encoder, "interrupt_gpio")
+    encoder_rotation_step = _optional_int(encoder, "rotation_step", 1, min_v=1, max_v=32)
+    encoder_debounce_ms = _optional_int(encoder, "debounce_ms", 15, min_v=0, max_v=2000)
+    encoder_long_press_ms = _optional_int(encoder, "long_press_ms", 700, min_v=50, max_v=5000)
+
     left_led_status = _optional_str(leds, "left_status", "NOT_CONFIGURED").upper()
     right_led_status = _optional_str(leds, "right_status", "NOT_CONFIGURED").upper()
     fan_status = _optional_str(fan, "status", "NOT_CONFIGURED").upper()
@@ -260,14 +289,14 @@ def parse_hardware(data: Mapping[str, Any], *, source: str = "") -> HardwareConf
     if fan_mode not in {"platform", "gpio", "pwm", "disabled"}:
         raise ConfigError("[fan] mode must be platform, gpio, pwm, or disabled.")
 
-    # Refuse invented encoder/LED/fan pins when status says not configured.
+    # Refuse invented quadrature GPIO pins when status says not configured.
     enc_a = _optional_gpio(encoder, "gpio_a")
     enc_b = _optional_gpio(encoder, "gpio_b")
     enc_btn = _optional_gpio(encoder, "gpio_button")
     if encoder_status in {"NOT_CONFIGURED", "UNSUPPORTED"} and any(v is not None for v in (enc_a, enc_b, enc_btn)):
         raise ConfigError(
-            "[encoder] pins are set but status is NOT_CONFIGURED/UNSUPPORTED. "
-            "Set status only after PCB verification, or remove pin values."
+            "[encoder] quadrature gpio_* pins are set but status is NOT_CONFIGURED/UNSUPPORTED. "
+            "Seesaw uses I²C — set type/address instead, or remove pin values."
         )
 
     left_led = _optional_gpio(leds, "left_gpio_bcm")
@@ -297,8 +326,15 @@ def parse_hardware(data: Mapping[str, Any], *, source: str = "") -> HardwareConf
         poll_ms=poll_ms,
         left_button=left_btn,
         right_button=right_btn,
-        encoder_enabled=_optional_bool(encoder, "enabled", False),
+        encoder_enabled=encoder_enabled,
         encoder_status=encoder_status,
+        encoder_type=encoder_type,
+        encoder_i2c_bus=encoder_i2c_bus,
+        encoder_address=encoder_address,
+        encoder_interrupt_gpio=encoder_interrupt_gpio,
+        encoder_rotation_step=encoder_rotation_step,
+        encoder_debounce_ms=encoder_debounce_ms,
+        encoder_long_press_ms=encoder_long_press_ms,
         encoder_gpio_a=enc_a,
         encoder_gpio_b=enc_b,
         encoder_gpio_button=enc_btn,

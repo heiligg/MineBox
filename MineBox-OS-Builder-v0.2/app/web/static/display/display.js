@@ -180,6 +180,19 @@
     }
   }
 
+  function intentHome() {
+    go("home");
+  }
+
+  function intentContext() {
+    // No UI redesign — System is the appliance context/settings surface.
+    go("system");
+  }
+
+  function intentPower() {
+    go("power");
+  }
+
   async function intentSelect() {
     const items = currentItems();
     const item = items[state.focus];
@@ -255,14 +268,16 @@
     }
     const map = state.actionMap || {};
     const table = {
-      ENCODER_RIGHT: map.encoder_right || "next",
-      ENCODER_LEFT: map.encoder_left || "prev",
+      ENCODER_CW: map.encoder_cw || map.encoder_right || "next",
+      ENCODER_CCW: map.encoder_ccw || map.encoder_left || "prev",
+      ENCODER_RIGHT: map.encoder_cw || map.encoder_right || "next",
+      ENCODER_LEFT: map.encoder_ccw || map.encoder_left || "prev",
       ENCODER_PRESS: map.encoder_press || "select",
       ENCODER_LONG_PRESS: map.encoder_long_press || "back",
-      LEFT_BUTTON_PRESS: map.left_button_press || "prev",
-      LEFT_BUTTON_HOLD: map.left_button_hold || "back",
-      RIGHT_BUTTON_PRESS: map.right_button_press || "next",
-      RIGHT_BUTTON_HOLD: map.right_button_hold || "select",
+      LEFT_BUTTON_PRESS: map.left_button_press || "back",
+      LEFT_BUTTON_HOLD: map.left_button_hold || "home",
+      RIGHT_BUTTON_PRESS: map.right_button_press || "context",
+      RIGHT_BUTTON_HOLD: map.right_button_hold || "power",
     };
     const intent = table[type];
     if (!intent) return;
@@ -270,6 +285,9 @@
     if (intent === "next") intentNext();
     else if (intent === "prev") intentPrev();
     else if (intent === "back") intentBack();
+    else if (intent === "home") intentHome();
+    else if (intent === "context") intentContext();
+    else if (intent === "power") intentPower();
     else if (intent === "select") intentSelect();
     render();
   }
@@ -589,16 +607,19 @@
       const key = e.key;
       if (["ArrowRight", "ArrowDown", "d", "D"].includes(key)) {
         e.preventDefault();
-        applyEvent("ENCODER_RIGHT");
+        applyEvent("ENCODER_CW");
       } else if (["ArrowLeft", "ArrowUp", "a", "A"].includes(key)) {
         e.preventDefault();
-        applyEvent("ENCODER_LEFT");
+        applyEvent("ENCODER_CCW");
       } else if (key === "Enter") {
         e.preventDefault();
         applyEvent("ENCODER_PRESS");
       } else if (key === "Escape" || key === "Backspace") {
         e.preventDefault();
-        applyEvent("ENCODER_LONG_PRESS");
+        applyEvent("LEFT_BUTTON_PRESS");
+      } else if (key === "Home" || key === "h" || key === "H") {
+        e.preventDefault();
+        applyEvent("LEFT_BUTTON_HOLD");
       } else if (key === "[") {
         e.preventDefault();
         applyEvent("LEFT_BUTTON_PRESS");
@@ -637,6 +658,9 @@
     intentNext,
     intentPrev,
     intentBack,
+    intentHome,
+    intentContext,
+    intentPower,
     intentSelect,
   };
 

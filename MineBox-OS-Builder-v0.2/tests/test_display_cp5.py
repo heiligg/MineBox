@@ -59,10 +59,13 @@ class DisplayCp5Tests(unittest.TestCase):
         from display.actions import DEFAULT_ACTION_MAP
         from display.events import DisplayEventType
 
-        self.assertEqual(DEFAULT_ACTION_MAP.intent_for(DisplayEventType.ENCODER_RIGHT), "next")
+        self.assertEqual(DEFAULT_ACTION_MAP.intent_for(DisplayEventType.ENCODER_CW), "next")
+        self.assertEqual(DEFAULT_ACTION_MAP.intent_for(DisplayEventType.ENCODER_CCW), "prev")
         self.assertEqual(DEFAULT_ACTION_MAP.intent_for(DisplayEventType.ENCODER_LONG_PRESS), "back")
-        self.assertEqual(DEFAULT_ACTION_MAP.intent_for(DisplayEventType.LEFT_BUTTON_HOLD), "back")
-        self.assertEqual(DEFAULT_ACTION_MAP.intent_for(DisplayEventType.RIGHT_BUTTON_HOLD), "select")
+        self.assertEqual(DEFAULT_ACTION_MAP.intent_for(DisplayEventType.LEFT_BUTTON_HOLD), "home")
+        self.assertEqual(DEFAULT_ACTION_MAP.intent_for(DisplayEventType.RIGHT_BUTTON_HOLD), "power")
+        self.assertEqual(DEFAULT_ACTION_MAP.intent_for(DisplayEventType.LEFT_BUTTON_PRESS), "back")
+        self.assertEqual(DEFAULT_ACTION_MAP.intent_for(DisplayEventType.RIGHT_BUTTON_PRESS), "context")
 
     def test_bridge_encoder_ordering_and_inject(self) -> None:
         from display.events import DisplayEventType
@@ -73,7 +76,7 @@ class DisplayCp5Tests(unittest.TestCase):
         hw.inject_encoder_delta(2)
         events = self.bridge.poll()
         types = [e.type for e in events]
-        self.assertEqual(types.count(DisplayEventType.ENCODER_RIGHT), 2)
+        self.assertEqual(types.count(DisplayEventType.ENCODER_CW), 2)
         injected = self.bridge.inject(DisplayEventType.ENCODER_PRESS, source="test")
         self.assertEqual(injected.type, DisplayEventType.ENCODER_PRESS)
 
@@ -165,11 +168,13 @@ class DisplayCp5Tests(unittest.TestCase):
         )
         self.assertTrue(ui.is_file())
 
-    def test_no_encoder_gpio_invented(self) -> None:
+    def test_no_encoder_quadrature_gpio_invented(self) -> None:
         hw = (ROOT / "config" / "hardware.example.toml").read_text(encoding="utf-8")
-        self.assertIn("NOT_CONFIGURED", hw)
-        # Must not invent concrete encoder BCM pins.
+        self.assertIn("adafruit_seesaw", hw)
+        # Must not invent concrete quadrature encoder BCM pins.
         self.assertNotRegex(hw, r"gpio_a\s*=\s*\d+")
+        self.assertNotRegex(hw, r"gpio_b\s*=\s*\d+")
+        self.assertIn("interrupt_gpio", hw)
 
     def test_display_docs_exist(self) -> None:
         docs = ROOT / "docs" / "v1"
@@ -181,6 +186,8 @@ class DisplayCp5Tests(unittest.TestCase):
             "Boot_Experience.md",
             "Hardware_Diagnostics.md",
             "User_Manual.md",
+            "Encoder.md",
+            "Hardware_Controls.md",
         ):
             self.assertTrue((docs / name).is_file(), msg=name)
 

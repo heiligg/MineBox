@@ -12,7 +12,11 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from pathlib import Path
 
-from display.actions import ALLOWED_DISPLAY_ACTIONS, DEFAULT_ACTION_MAP, DESTRUCTIVE_ACTIONS
+from display.actions import (
+    ALLOWED_DISPLAY_ACTIONS,
+    DESTRUCTIVE_ACTIONS,
+    resolve_action_map,
+)
 from display.bridge import get_display_bridge
 from display.events import DisplayEventType
 from display.local_trust import (
@@ -115,9 +119,20 @@ def display_trust(request: Request) -> dict[str, Any]:
     }
 
 
+def _current_action_map():
+    bridge = get_display_bridge()
+    return resolve_action_map(encoder_available=bridge.encoder_connected)
+
+
 @router.get("/api/v1/display/action-map")
 def action_map() -> dict[str, Any]:
-    return {"ok": True, "map": DEFAULT_ACTION_MAP.to_public_dict()}
+    bridge = get_display_bridge()
+    amap = resolve_action_map(encoder_available=bridge.encoder_connected)
+    return {
+        "ok": True,
+        "map": amap.to_public_dict(),
+        "encoder_connected": bridge.encoder_connected,
+    }
 
 
 @router.get("/api/v1/display/snapshot")
@@ -191,7 +206,9 @@ def snapshot(request: Request) -> dict[str, Any]:
         "foundation": foundation,
         "backups": backups,
         "network": network,
-        "action_map": DEFAULT_ACTION_MAP.to_public_dict(),
+        "action_map": resolve_action_map(
+            encoder_available=get_display_bridge().encoder_connected
+        ).to_public_dict(),
         "hardware_diag": get_display_bridge().diagnostic_live(),
     }
 
@@ -206,7 +223,7 @@ def poll_events(request: Request, diagnostics: bool = False) -> dict[str, Any]:
         "ok": True,
         "events": events,
         "diagnostics_mode": bridge.diagnostics_mode,
-        "map": DEFAULT_ACTION_MAP.to_public_dict(),
+        "map": resolve_action_map(encoder_available=bridge.encoder_connected).to_public_dict(),
     }
 
 
