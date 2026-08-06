@@ -36,3 +36,12 @@ Chromium (`chromium` / `chromium-browser`), `xinit`, optional `openbox`, `xset` 
 ## Fallback
 
 If the kiosk fails: use tty1 curses (`minebox-ui.service`) or SSH/local console. Graphical UI does **not** remove curses.
+
+## Waveshare-class HDMI (800×480)
+
+OTA / `minebox-ensure-panel` sets:
+- `video=HDMI-A-1:800x480@60` in cmdline (landscape)
+- `hdmi_cvt=800 480 …` helpers in `config.txt`
+- `minebox-display.service` `WantedBy=multi-user.target` (not only `graphical.target`)
+
+Reboot once after the first panel config change. Kernel log spam on the text UI is reduced via `quiet loglevel=3`.

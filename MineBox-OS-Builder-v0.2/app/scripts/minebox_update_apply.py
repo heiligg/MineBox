@@ -817,6 +817,25 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
     ensure_i2c_enabled()
     ensure_encoder_rev_d_config()
     install_networkmanager_polkit(target, dev)
+    panel_script = target / "scripts" / "minebox_ensure_panel.py"
+    if panel_script.is_file():
+        run(["chmod", "0755", str(panel_script)])
+        run(
+            [
+                "install",
+                "-m",
+                "0755",
+                str(panel_script),
+                "/usr/local/sbin/minebox-ensure-panel",
+            ]
+        )
+        subprocess.run(
+            ["/usr/bin/python3", str(panel_script)],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
     script = target / "scripts" / "minebox_fix_minecraft_perms.py"
     if script.is_file():
         run(["chmod", "0755", str(script)])

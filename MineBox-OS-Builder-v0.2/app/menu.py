@@ -148,6 +148,24 @@ class MineBoxApp:
         while self.running:
             if self.dashboard() == "menu": self.main_menu()
 
+    def _nav_footer(self) -> str:
+        """Match footer hints to the live action map (API-owned encoder)."""
+        try:
+            import json
+            import urllib.request
+
+            with urllib.request.urlopen(
+                "http://127.0.0.1:8080/api/v1/display/action-map",
+                timeout=0.8,
+            ) as resp:
+                data = json.loads(resp.read().decode("utf-8", "replace"))
+            scheme = str((data.get("map") or {}).get("scheme") or "")
+            if scheme == "hardware_rev_d" or data.get("encoder_connected"):
+                return "Encoder: move/select | L: Back/Home | R: Context/Power"
+        except Exception:
+            pass
+        return "L/R short: Move | Hold L: Back | Hold R: Select"
+
     def dashboard(self) -> str:
         self.set_input_timeout(int(self.settings.get("refresh_seconds", 2) * 1000))
         while self.running:
@@ -177,9 +195,7 @@ class MineBoxApp:
                 if line.startswith("Minecraft:"): attr = self.color_ok if online else self.color_bad
                 elif line.startswith("WARNING:"): attr = self.color_warn
                 self.safe(row, 2, line, attr); row += 1
-            self.footer(
-                "Encoder: move/select | L: Back/Home | R: Context/Power"
-            )
+            self.footer(self._nav_footer())
             self.screen.refresh(); key = self.get_key()
             # Fallback two-button nav uses UP/DOWN; Rev D uses encoder + secondary buttons.
             if key in (curses.KEY_UP, curses.KEY_DOWN):

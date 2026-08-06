@@ -167,11 +167,27 @@ class SeesawEncoderDriver:
             return False
 
         try:
+            # Probe configured address, then scan Product 5880 jumper range.
+            addrs = [self.config.address]
+            for candidate in range(0x36, 0x3E):
+                if candidate not in addrs:
+                    addrs.append(candidate)
+
             bus = SMBus(self.config.i2c_bus)
-            # Probe hardware id.
-            hw_id = self._smbus_read8(bus, _STATUS_BASE, _STATUS_HW_ID)
+            hw_id = None
+            used_addr = self.config.address
+            for addr in addrs:
+                self.config.address = addr
+                hw_id = self._smbus_read8(bus, _STATUS_BASE, _STATUS_HW_ID)
+                if hw_id is not None:
+                    used_addr = addr
+                    break
             if hw_id is None:
-                raise OSError("no response to Seesaw HW_ID")
+                self.config.address = used_addr
+                raise OSError(
+                    f"no response to Seesaw HW_ID on 0x36-0x3D bus={self.config.i2c_bus}"
+                )
+            self.config.address = used_addr
             # Soft reset then configure switch pull-up + encoder IRQ.
             self._smbus_write(bus, _STATUS_BASE, _STATUS_SWRST, bytes([0xFF]))
             time.sleep(0.02)
