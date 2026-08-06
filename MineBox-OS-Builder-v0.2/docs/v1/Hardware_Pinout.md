@@ -40,9 +40,11 @@ When the Seesaw encoder is enabled and connected, buttons switch to secondary Re
 
 Timing defaults: debounce 40 ms, long-press 450 ms, lockout 150 ms.
 
-`minebox-api` must run with `SupplementaryGroups=gpio input` (and the `minebox`
-user in those groups) or button claims fail silently. Do not add `DeviceAllow=`
-for specific gpiochips — that closes the device policy and can hide the chip
+`minebox-api` is the **sole GPIO owner** for the buttons (`SupplementaryGroups=gpio input`).
+The curses recovery UI (`minebox-ui`) must poll `/api/v1/display/events` and must not
+open gpiozero on the same BCM lines — dual claim causes `GPIO busy` and dead buttons.
+
+Do not add `DeviceAllow=` for specific gpiochips — that closes the device policy and can hide the chip
 gpiozero/lgpio needs on some Pi 5 kernels.
 ---
 
