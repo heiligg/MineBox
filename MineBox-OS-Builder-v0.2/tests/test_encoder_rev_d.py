@@ -17,6 +17,34 @@ class EncoderRevDTests(unittest.TestCase):
         os.environ["MINEBOX_FORCE_MOCK_HARDWARE"] = "1"
         os.environ["MINEBOX_HARDWARE_PROFILE"] = "mock"
         os.environ["MINEBOX_AUTH_FILE"] = str(Path(self.tmp.name) / "auth.json")
+        # Rev D encoder tests need encoder enabled (appliance default is off).
+        hw_path = Path(self.tmp.name) / "hardware.toml"
+        hw_path.write_text(
+            "\n".join(
+                [
+                    "[profile]",
+                    'name = "mock"',
+                    "[buttons.left]",
+                    "gpio_bcm = 23",
+                    'short_action = "back"',
+                    'long_action = "home"',
+                    "[buttons.right]",
+                    "gpio_bcm = 17",
+                    'short_action = "context"',
+                    'long_action = "power"',
+                    "[encoder]",
+                    "enabled = true",
+                    'type = "adafruit_seesaw"',
+                    'status = "OK"',
+                    "i2c_bus = 1",
+                    "address = 0x36",
+                    "interrupt_gpio = 24",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        os.environ["MINEBOX_HARDWARE_CONFIG"] = str(hw_path)
         import sys
 
         app_dir = str(ROOT / "app")
@@ -37,6 +65,7 @@ class EncoderRevDTests(unittest.TestCase):
 
         reset_hardware()
         clear_config_cache()
+        os.environ.pop("MINEBOX_HARDWARE_CONFIG", None)
         self.tmp.cleanup()
 
     def _hw(self):
@@ -109,12 +138,18 @@ class EncoderRevDTests(unittest.TestCase):
         self.assertEqual(rev.intent_for(DisplayEventType.ENCODER_CW), "next")
         self.assertEqual(rev.intent_for(DisplayEventType.ENCODER_CCW), "prev")
         self.assertEqual(rev.intent_for(DisplayEventType.ENCODER_PRESS), "select")
+        self.assertIs(DEFAULT_ACTION_MAP, rev)
 
         fb = resolve_action_map(encoder_available=False)
         self.assertEqual(fb.intent_for(DisplayEventType.LEFT_BUTTON_PRESS), "prev")
         self.assertEqual(fb.intent_for(DisplayEventType.RIGHT_BUTTON_PRESS), "next")
-        self.assertIs(DEFAULT_ACTION_MAP, rev)
         self.assertEqual(fb.left_button_press, TWO_BUTTON_FALLBACK_ACTION_MAP.left_button_press)
+
+        # Explicit Rev D map constants remain available for docs/tests.
+        self.assertEqual(
+            DEFAULT_ACTION_MAP.intent_for(DisplayEventType.LEFT_BUTTON_PRESS),
+            "back",
+        )
 
     def test_nav_home_context_power(self) -> None:
         from display.nav import NavState
@@ -143,15 +178,15 @@ class EncoderRevDTests(unittest.TestCase):
             ROOT / "config" / "minebox.example.toml",
             ROOT / "config" / "hardware.example.toml",
         ).hardware
-        self.assertTrue(cfg.encoder_enabled)
+        self.assertFalse(cfg.encoder_enabled)
         self.assertEqual(cfg.encoder_type, "adafruit_seesaw")
         self.assertEqual(cfg.encoder_address, 0x36)
         self.assertEqual(cfg.encoder_i2c_bus, 1)
         self.assertEqual(cfg.encoder_interrupt_gpio, 24)
         self.assertEqual(cfg.encoder_debounce_ms, 15)
         self.assertEqual(cfg.encoder_long_press_ms, 700)
-        self.assertEqual(cfg.left_button.short_action, "back")
-        self.assertEqual(cfg.right_button.long_action, "power")
+        self.assertEqual(cfg.left_button.short_action, "prev")
+        self.assertEqual(cfg.right_button.long_action, "select")
 
     def test_driver_module_importable(self) -> None:
         from hardware.seesaw_encoder import SeesawEncoderConfig, SeesawEncoderDriver

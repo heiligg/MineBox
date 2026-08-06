@@ -18,17 +18,47 @@ class DisplayCp5Tests(unittest.TestCase):
         os.environ["MINEBOX_DISPLAY_TOKEN_FILE"] = str(Path(self.tmp.name) / "display_token")
         os.environ["MINEBOX_FORCE_MOCK_HARDWARE"] = "1"
         os.environ["MINEBOX_AUTH_FILE"] = str(Path(self.tmp.name) / "auth.json")
+        hw_path = Path(self.tmp.name) / "hardware.toml"
+        hw_path.write_text(
+            "\n".join(
+                [
+                    "[profile]",
+                    'name = "mock"',
+                    "[buttons.left]",
+                    "gpio_bcm = 23",
+                    "[buttons.right]",
+                    "gpio_bcm = 17",
+                    "[encoder]",
+                    "enabled = true",
+                    'type = "adafruit_seesaw"',
+                    'status = "OK"',
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        os.environ["MINEBOX_HARDWARE_CONFIG"] = str(hw_path)
         import sys
 
         app_dir = str(ROOT / "app")
         if app_dir not in sys.path:
             sys.path.insert(0, app_dir)
 
+        from core.minebox_config import clear_config_cache
         from display.bridge import reset_display_bridge_for_tests
+        from hardware.factory import reset_hardware
 
+        clear_config_cache()
+        reset_hardware()
         self.bridge = reset_display_bridge_for_tests()
 
     def tearDown(self) -> None:
+        from core.minebox_config import clear_config_cache
+        from hardware.factory import reset_hardware
+
+        reset_hardware()
+        clear_config_cache()
+        os.environ.pop("MINEBOX_HARDWARE_CONFIG", None)
         self.tmp.cleanup()
 
     def test_nav_focus_next_prev_wrap(self) -> None:

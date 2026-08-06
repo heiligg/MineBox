@@ -56,9 +56,10 @@ See `[encoder]` in `config/hardware.example.toml` / `/etc/minebox/hardware.toml`
 
 ```toml
 [encoder]
-enabled = true
+# Keep disabled until the Seesaw (Product 5880) is installed.
+enabled = false
 type = "adafruit_seesaw"
-status = "OK"
+status = "NOT_CONFIGURED"
 i2c_bus = 1
 address = 0x36
 interrupt_gpio = 24
@@ -67,6 +68,8 @@ debounce_ms = 15
 long_press_ms = 700
 ```
 
+While `enabled = false`, the dual front-panel buttons use the classic scheme:
+short left/right = prev/next, hold left = back, hold right = select.
 ---
 
 ## Events

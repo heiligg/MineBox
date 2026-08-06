@@ -204,8 +204,8 @@ def _parse_button(section: Mapping[str, Any], name: str, defaults: Mapping[str, 
     physical = data.get("physical_pin")
     if physical is not None and (not isinstance(physical, int) or isinstance(physical, bool)):
         raise ConfigError(f"[buttons.{name}] physical_pin must be an integer or omitted.")
-    short_action = _optional_str(data, "short_action", "back" if name == "left" else "context")
-    long_action = _optional_str(data, "long_action", "home" if name == "left" else "power")
+    short_action = _optional_str(data, "short_action", "prev" if name == "left" else "next")
+    long_action = _optional_str(data, "long_action", "back" if name == "left" else "select")
     return ButtonConfig(
         gpio_bcm=gpio,
         physical_pin=physical if isinstance(physical, int) else None,
@@ -253,9 +253,9 @@ def parse_hardware(data: Mapping[str, Any], *, source: str = "") -> HardwareConf
     lockout_ms = _optional_int(buttons, "lockout_ms", 150, min_v=0, max_v=2000)
     poll_ms = _optional_int(buttons, "poll_ms", 5, min_v=1, max_v=100)
 
-    # Hardware Rev D defaults: buttons are secondary (Back/Home/Context/Power).
-    left_defaults = {"gpio_bcm": 23, "physical_pin": 16, "short_action": "back", "long_action": "home"}
-    right_defaults = {"gpio_bcm": 17, "physical_pin": 11, "short_action": "context", "long_action": "power"}
+    # Two-button primary nav while encoder is disabled / not installed.
+    left_defaults = {"gpio_bcm": 23, "physical_pin": 16, "short_action": "prev", "long_action": "back"}
+    right_defaults = {"gpio_bcm": 17, "physical_pin": 11, "short_action": "next", "long_action": "select"}
 
     left_btn = _parse_button(left or left_defaults, "left", left_defaults)
     right_btn = _parse_button(right or right_defaults, "right", right_defaults)

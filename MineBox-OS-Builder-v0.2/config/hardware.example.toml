@@ -1,11 +1,11 @@
 # MineBox hardware profile (example)
 # Appliance path: /etc/minebox/hardware.toml
 #
-# Hardware Revision D — Adafruit Seesaw rotary encoder (Product 5880) is primary
-# navigation. Dual illuminated buttons remain as secondary controls.
+# Encoder is DISABLED for now (no Seesaw installed). Dual buttons use the
+# classic two-button navigation scheme. Re-enable [encoder] when Hardware
+# Rev D (Adafruit Product 5880) is wired.
 #
 # Button BCM assignments below are PROVISIONAL / UNVERIFIED_AGAINST_PCB.
-# Encoder INT GPIO is the Pi-side interrupt line for the Seesaw INT pin.
 
 [profile]
 name = "raspberry_pi5"
@@ -23,20 +23,21 @@ poll_ms = 5
 [buttons.left]
 gpio_bcm = 23
 physical_pin = 16
-short_action = "back"
-long_action = "home"
+short_action = "prev"
+long_action = "back"
 
 [buttons.right]
 gpio_bcm = 17
 physical_pin = 11
-short_action = "context"
-long_action = "power"
+short_action = "next"
+long_action = "select"
 
 [encoder]
 # Adafruit Seesaw Rotary Encoder — Product 5880 (I²C).
-enabled = true
+# Leave disabled until the breakout is installed; buttons stay primary nav.
+enabled = false
 type = "adafruit_seesaw"
-status = "OK"
+status = "NOT_CONFIGURED"
 i2c_bus = 1
 address = 0x36
 interrupt_gpio = 24

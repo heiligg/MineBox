@@ -680,10 +680,70 @@ def install_networkmanager_polkit(target: Path, dev: bool) -> None:
     )
 
 
+def ensure_two_button_nav_config() -> None:
+    """Keep encoder off and restore classic button actions until Seesaw ships."""
+    path = Path("/etc/minebox/hardware.toml")
+    if not path.is_file():
+        return
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        print(f"warning: could not read {path}: {exc}", flush=True)
+        return
+
+    section = ""
+    changed = False
+    out: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("[") and stripped.endswith("]"):
+            section = stripped
+            out.append(line)
+            continue
+        if section == "[encoder]":
+            if stripped.startswith("enabled"):
+                if "false" not in stripped.lower():
+                    changed = True
+                out.append("enabled = false")
+                continue
+            if stripped.startswith("status"):
+                out.append('status = "NOT_CONFIGURED"')
+                changed = True
+                continue
+        if section == "[buttons.left]":
+            if stripped.startswith("short_action"):
+                out.append('short_action = "prev"')
+                changed = True
+                continue
+            if stripped.startswith("long_action"):
+                out.append('long_action = "back"')
+                changed = True
+                continue
+        if section == "[buttons.right]":
+            if stripped.startswith("short_action"):
+                out.append('short_action = "next"')
+                changed = True
+                continue
+            if stripped.startswith("long_action"):
+                out.append('long_action = "select"')
+                changed = True
+                continue
+        out.append(line)
+
+    if not changed:
+        return
+    try:
+        path.write_text("\n".join(out) + "\n", encoding="utf-8")
+        print(f"Updated {path}: encoder disabled, two-button nav restored.", flush=True)
+    except OSError as exc:
+        print(f"warning: could not write {path}: {exc}", flush=True)
+
+
 def install_minecraft_permissions(target: Path, dev: bool) -> None:
     """Make /opt/minecraft writable by the minebox dashboard user."""
     if dev:
         return
+    ensure_two_button_nav_config()
     install_networkmanager_polkit(target, dev)
     script = target / "scripts" / "minebox_fix_minecraft_perms.py"
     if script.is_file():

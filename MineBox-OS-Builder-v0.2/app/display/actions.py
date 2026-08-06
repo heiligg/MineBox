@@ -99,8 +99,17 @@ TWO_BUTTON_FALLBACK_ACTION_MAP = ActionMap(
 
 
 def resolve_action_map(*, encoder_available: bool) -> ActionMap:
-    """Pick Rev D map when encoder is present; otherwise two-button fallback."""
-    return DEFAULT_ACTION_MAP if encoder_available else TWO_BUTTON_FALLBACK_ACTION_MAP
+    """Pick Rev D map only when encoder is enabled in config AND connected."""
+    encoder_enabled = False
+    try:
+        from core.minebox_config import get_config
+
+        encoder_enabled = bool(get_config().hardware.encoder_enabled)
+    except Exception:
+        encoder_enabled = False
+    if encoder_enabled and encoder_available:
+        return DEFAULT_ACTION_MAP
+    return TWO_BUTTON_FALLBACK_ACTION_MAP
 
 
 # Screens that support idle return to home.
