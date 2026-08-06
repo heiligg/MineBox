@@ -267,6 +267,7 @@
       return;
     }
     const map = state.actionMap || {};
+    const fallbackNav = map.scheme === "two_button_fallback" || !map.left_button_press;
     const table = {
       ENCODER_CW: map.encoder_cw || map.encoder_right || "next",
       ENCODER_CCW: map.encoder_ccw || map.encoder_left || "prev",
@@ -274,10 +275,11 @@
       ENCODER_LEFT: map.encoder_ccw || map.encoder_left || "prev",
       ENCODER_PRESS: map.encoder_press || "select",
       ENCODER_LONG_PRESS: map.encoder_long_press || "back",
-      LEFT_BUTTON_PRESS: map.left_button_press || "back",
-      LEFT_BUTTON_HOLD: map.left_button_hold || "home",
-      RIGHT_BUTTON_PRESS: map.right_button_press || "context",
-      RIGHT_BUTTON_HOLD: map.right_button_hold || "power",
+      // Default to two-button nav when the action map has not loaded yet.
+      LEFT_BUTTON_PRESS: map.left_button_press || (fallbackNav ? "prev" : "back"),
+      LEFT_BUTTON_HOLD: map.left_button_hold || (fallbackNav ? "back" : "home"),
+      RIGHT_BUTTON_PRESS: map.right_button_press || (fallbackNav ? "next" : "context"),
+      RIGHT_BUTTON_HOLD: map.right_button_hold || (fallbackNav ? "select" : "power"),
     };
     const intent = table[type];
     if (!intent) return;
@@ -498,7 +500,11 @@
 
     const footer = el("div", "footer");
     footer.appendChild(el("span", "", "Encoder: turn=move · press=select · hold=back"));
-    footer.appendChild(el("span", "", "Buttons: short=move · hold L=back · hold R=select"));
+    const buttonHint =
+      (state.actionMap && state.actionMap.scheme === "hardware_rev_d")
+        ? "Buttons: L short=back hold=home · R short=context hold=power"
+        : "Buttons: short L/R=move · hold L=back · hold R=select";
+    footer.appendChild(el("span", "", buttonHint));
     screen.appendChild(footer);
     app.appendChild(screen);
   }

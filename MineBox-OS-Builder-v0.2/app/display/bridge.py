@@ -34,7 +34,9 @@ class DisplayEventBridge:
         self._queue: deque[DisplayEvent] = deque(maxlen=max_queue)
         self._seq = 0
         self._connected = True
-        self._encoder_connected = True
+        # Assume no encoder until HAL reports one — otherwise two-button fallback
+        # never engages and short presses map to back/context instead of prev/next.
+        self._encoder_connected = False
         enc_debounce = encoder_debounce_ms if encoder_debounce_ms is not None else debounce_ms
         enc_long = encoder_long_press_ms if encoder_long_press_ms is not None else long_press_ms
         self._encoder_press_logic = DebouncedButtonLogic(

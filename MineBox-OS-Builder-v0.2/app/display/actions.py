@@ -29,6 +29,12 @@ class ActionMap:
     # Public aliases kept for API / JS compatibility.
     encoder_right: str = "next"
     encoder_left: str = "prev"
+    scheme: str = "hardware_rev_d"
+    notes: str = (
+        "Encoder is primary navigation (CW/CCW/press). "
+        "Left short=back, left hold=home; "
+        "right short=context, right hold=power."
+    )
 
     def intent_for(self, event_type: DisplayEventType | str) -> str | None:
         key = event_type.value if isinstance(event_type, DisplayEventType) else str(event_type)
@@ -58,16 +64,19 @@ class ActionMap:
             "left_button_hold": self.left_button_hold,
             "right_button_press": self.right_button_press,
             "right_button_hold": self.right_button_hold,
-            "scheme": "hardware_rev_d",
-            "notes": (
-                "Encoder is primary navigation (CW/CCW/press). "
-                "Left short=back, left hold=home; "
-                "right short=context, right hold=power."
-            ),
+            "scheme": self.scheme,
+            "notes": self.notes,
         }
 
 
-DEFAULT_ACTION_MAP = ActionMap()
+DEFAULT_ACTION_MAP = ActionMap(
+    scheme="hardware_rev_d",
+    notes=(
+        "Encoder is primary navigation (CW/CCW/press). "
+        "Left short=back, left hold=home; "
+        "right short=context, right hold=power."
+    ),
+)
 
 # Used when the Seesaw encoder is missing — temporary two-button navigation.
 TWO_BUTTON_FALLBACK_ACTION_MAP = ActionMap(
@@ -81,6 +90,11 @@ TWO_BUTTON_FALLBACK_ACTION_MAP = ActionMap(
     right_button_hold="select",
     encoder_right="next",
     encoder_left="prev",
+    scheme="two_button_fallback",
+    notes=(
+        "Encoder missing — left/right short move selection; "
+        "left hold=back, right hold=select."
+    ),
 )
 
 
