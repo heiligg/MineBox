@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """Physical MineBox buttons → curses key codes.
 
-Hardware Rev D (encoder present):
+Reads through the shared hardware HAL when possible so gpiozero does not
+double-claim the same BCM lines (API display bridge + curses UI).
+
+Encoder disabled / missing (current appliance default):
+  Short Left/Right → KEY_UP / KEY_DOWN (nav)
+  Hold Left/Right  → KEY_LEFT / KEY_ENTER (back / select)
+
+Encoder present + enabled (Hardware Rev D):
   Short Left  → KEY_LEFT   (Back)
   Hold Left   → KEY_HOME   (Home / dashboard)
   Short Right → KEY_RIGHT  (Context / quick)
   Hold Right  → KEY_END    (Power menu)
-
-Fallback when encoder missing:
-  Short Left/Right → KEY_UP / KEY_DOWN (nav)
-  Hold Left/Right  → KEY_LEFT / KEY_ENTER (back / select)
 
 GPIO BCM numbers come from centralized hardware configuration.
 Provisional defaults (UNVERIFIED_AGAINST_PCB): left BCM23, right BCM17.
@@ -33,8 +36,11 @@ _FALLBACK_RIGHT_GPIO = 17
 
 def _encoder_present() -> bool:
     try:
+        from core.minebox_config import get_config
         from hardware.factory import get_hardware
 
+        if not get_config().hardware.encoder_enabled:
+            return False
         hw = get_hardware()
         getter = getattr(hw, "encoder_available", None)
         if callable(getter):
@@ -67,10 +73,32 @@ def _load_button_settings() -> tuple[int, int, DebounceConfig]:
         )
 
 
-class _DebouncedPin:
+class _HalPin:
+    """Button level reader backed by RaspberryPi5Hardware / mock HAL."""
+
+    def __init__(self, side: str, logic: DebouncedButtonLogic) -> None:
+        self.side = side
+        self.logic = logic
+
+    def is_pressed(self) -> bool:
+        from hardware.factory import get_hardware
+
+        hw = get_hardware()
+        if self.side == "left":
+            return bool(hw.read_left_button())
+        return bool(hw.read_right_button())
+
+    def close(self) -> None:
+        return
+
+
+class _GpioZeroPin:
     def __init__(self, button, logic: DebouncedButtonLogic) -> None:
         self.button = button
         self.logic = logic
+
+    def is_pressed(self) -> bool:
+        return bool(self.button.is_pressed)
 
     def close(self) -> None:
         try:
@@ -80,8 +108,6 @@ class _DebouncedPin:
 
 
 class ButtonController:
-    """Background GPIO poller that emits curses key codes onto a queue."""
-
     def __init__(
         self,
         *,
@@ -112,49 +138,65 @@ class ButtonController:
         self._queue: queue.Queue[int] = queue.Queue(maxsize=32)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self._left: _DebouncedPin | None = None
-        self._right: _DebouncedPin | None = None
+        self._left: _HalPin | _GpioZeroPin | None = None
+        self._right: _HalPin | _GpioZeroPin | None = None
         self.available = False
+        self._source = "none"
 
     def start(self) -> bool:
         if self._thread is not None:
             return self.available
-        try:
-            from gpiozero import Button
-        except Exception as exc:  # noqa: BLE001
-            LOGGER.warning("gpiozero unavailable: %s", exc)
-            return False
 
+        # Prefer shared HAL so we do not fight minebox-api for the same lines.
         try:
-            left_btn = Button(self.left_gpio, pull_up=True, bounce_time=None)
-            right_btn = Button(self.right_gpio, pull_up=True, bounce_time=None)
-        except Exception as exc:  # noqa: BLE001
-            LOGGER.warning("Could not claim button GPIOs: %s", exc)
-            return False
+            from hardware.factory import get_hardware
 
-        self._left = _DebouncedPin(left_btn, DebouncedButtonLogic(self.debounce))
-        self._right = _DebouncedPin(right_btn, DebouncedButtonLogic(self.debounce))
-        self.available = True
+            hw = get_hardware()
+            # Force GPIO init attempt; read returns False if unavailable.
+            _ = hw.read_left_button()
+            _ = hw.read_right_button()
+            snap = {}
+            try:
+                snap = hw.diagnostic_snapshot()
+            except Exception:  # noqa: BLE001
+                snap = {}
+            gpio_ok = bool(snap.get("gpio_available", True))
+            if gpio_ok or snap.get("profile") in {"mock", "raspberry_pi5"}:
+                self._left = _HalPin("left", DebouncedButtonLogic(self.debounce))
+                self._right = _HalPin("right", DebouncedButtonLogic(self.debounce))
+                self._source = "hal"
+                self.available = True
+        except Exception as exc:  # noqa: BLE001
+            LOGGER.warning("HAL button path unavailable: %s", exc)
+
+        if not self.available:
+            try:
+                from gpiozero import Button
+
+                left_btn = Button(self.left_gpio, pull_up=True, bounce_time=None)
+                right_btn = Button(self.right_gpio, pull_up=True, bounce_time=None)
+                self._left = _GpioZeroPin(left_btn, DebouncedButtonLogic(self.debounce))
+                self._right = _GpioZeroPin(right_btn, DebouncedButtonLogic(self.debounce))
+                self._source = "gpiozero"
+                self.available = True
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.warning("Could not claim button GPIOs: %s", exc)
+                return False
+
         self._thread = threading.Thread(
             target=self._run,
             name="minebox-gpio-buttons",
             daemon=True,
         )
         self._thread.start()
-        if self.rev_d:
-            LOGGER.info(
-                "Buttons Rev D (secondary): L short=back hold=home; "
-                "R short=context hold=power (BCM %s/%s)",
-                self.left_gpio,
-                self.right_gpio,
-            )
-        else:
-            LOGGER.info(
-                "Buttons fallback nav (encoder missing): short L/R=nav, "
-                "hold L=back, hold R=confirm (BCM %s/%s)",
-                self.left_gpio,
-                self.right_gpio,
-            )
+        mode = "Rev D secondary" if self.rev_d else "two-button nav"
+        LOGGER.info(
+            "Buttons via %s (%s): BCM %s/%s",
+            self._source,
+            mode,
+            self.left_gpio,
+            self.right_gpio,
+        )
         return True
 
     def stop(self) -> None:
@@ -191,12 +233,12 @@ class ButtonController:
 
     def _handle(
         self,
-        pin: _DebouncedPin,
+        pin: _HalPin | _GpioZeroPin,
         now: float,
         on_short: Callable[[], None],
         on_hold: Callable[[], None],
     ) -> None:
-        raw = bool(pin.button.is_pressed)
+        raw = bool(pin.is_pressed())
         action = pin.logic.update(raw, now)
         if action is PressAction.SHORT:
             on_short()

@@ -43,25 +43,34 @@ class RaspberryPi5Hardware:
             LOGGER.warning(self._gpio_error)
             return
 
-        pull_up = self.config.pull == "up"
+        # Active-low (default): internal pull-up, press to GND.
+        # Active-high: pull-down, press to 3V3.
+        active_high = self.config.active_level == "active_high"
+        pull_up = (self.config.pull == "up") if not active_high else False
+        if self.config.pull == "down":
+            pull_up = False
+        elif self.config.pull == "none":
+            pull_up = None  # type: ignore[assignment]
+
         try:
-            self._left_btn = Button(
-                self.config.left_button.gpio_bcm,
-                pull_up=pull_up,
-                bounce_time=None,
-            )
-            self._right_btn = Button(
-                self.config.right_button.gpio_bcm,
-                pull_up=pull_up,
-                bounce_time=None,
-            )
+            button_kwargs: dict[str, Any] = {
+                "pull_up": pull_up,
+                "bounce_time": None,
+            }
+            # gpiozero 2.x: active_state when pull_up is None; for pull_up True,
+            # pressed means line low (active-low). For active-high use pull_up=False.
+            if active_high:
+                button_kwargs["pull_up"] = False
+            self._left_btn = Button(self.config.left_button.gpio_bcm, **button_kwargs)
+            self._right_btn = Button(self.config.right_button.gpio_bcm, **button_kwargs)
             self._gpio_available = True
             LOGGER.info(
                 "Pi5 buttons claimed from config (UNVERIFIED_AGAINST_PCB): "
-                "left BCM%s right BCM%s active_level=%s",
+                "left BCM%s right BCM%s active_level=%s pull=%s",
                 self.config.left_button.gpio_bcm,
                 self.config.right_button.gpio_bcm,
                 self.config.active_level,
+                self.config.pull,
             )
         except Exception as exc:  # noqa: BLE001
             self._gpio_error = f"Could not claim button GPIOs: {exc}"

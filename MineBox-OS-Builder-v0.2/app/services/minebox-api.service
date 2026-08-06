@@ -11,6 +11,7 @@ StartLimitBurst=8
 Type=simple
 User=minebox
 Group=minebox
+SupplementaryGroups=gpio input
 WorkingDirectory=/opt/minebox
 Environment=PYTHONPATH=/opt/minebox
 Environment=PYTHONUNBUFFERED=1
@@ -29,6 +30,10 @@ ProtectSystem=full
 ProtectHome=false
 # /opt/java is used by minebox-ensure-java (Temurin) when apt has no matching JDK.
 ReadWritePaths=/opt/minebox /opt/minecraft /opt/java /var/lib/minebox /var/log/minebox /home/minebox /etc/minebox
+# Allow gpiozero / lgpio access to the Pi GPIO character device.
+DeviceAllow=/dev/gpiochip0 rw
+DeviceAllow=/dev/gpiochip1 rw
+DeviceAllow=/dev/gpiomem rw
 
 [Install]
 WantedBy=multi-user.target

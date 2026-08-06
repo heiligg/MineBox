@@ -23,19 +23,24 @@
 |--------|------------------|--------------|---------|-----------|------|--------|--------|--------------|
 | Left button | 23 | 16 | 3.3 V logic | Input | Internal pull-up | Active-low (to GND) | `config/hardware.example.toml` | **UNVERIFIED_AGAINST_PCB** |
 | Right button | 17 | 11 | 3.3 V logic | Input | Internal pull-up | Active-low (to GND) | same | **UNVERIFIED_AGAINST_PCB** |
-| GND | — | 14 | 0 V | — | — | — | — | UNVERIFIED_AGAINST_PCB |
+| GND | — | 14 (or any GND) | 0 V | — | — | — | — | UNVERIFIED_AGAINST_PCB |
 
 Centralized config: `/etc/minebox/hardware.toml` (example: `config/hardware.example.toml`).
 
-Rev D software behavior (configurable):
+Wire each switch between the BCM pin and **GND** (active-low). Do not connect button inputs to 5 V.
+
+**Current software (encoder disabled):**
 
 | Input | Short press | Long press |
 |-------|-------------|------------|
-| Left | `back` | `home` |
-| Right | `context` | `power` |
+| Left | `prev` (move up) | `back` |
+| Right | `next` (move down) | `select` |
+
+When the Seesaw encoder is enabled and connected, buttons switch to secondary Rev D actions (back/home/context/power).
 
 Timing defaults: debounce 40 ms, long-press 450 ms, lockout 150 ms.
 
+`minebox-api` must be in the `gpio` group (see `minebox-api.service`) or button claims fail silently.
 ---
 
 ## Encoder (Adafruit 5880 — Seesaw I²C)
