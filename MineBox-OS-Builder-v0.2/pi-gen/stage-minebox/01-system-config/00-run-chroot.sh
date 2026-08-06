@@ -32,6 +32,20 @@ ShowStatus=auto
 DefaultTimeoutStopSec=120s
 CONF
 
+# I²C1 for Adafruit Seesaw rotary encoder (Product 5880).
+for cfg in /boot/firmware/config.txt /boot/config.txt; do
+  if [ -f "$cfg" ]; then
+    sed -i 's/^#dtparam=i2c_arm=on/dtparam=i2c_arm=on/' "$cfg" || true
+    if ! grep -q '^dtparam=i2c_arm=on' "$cfg"; then
+      printf '\n# MineBox: Seesaw rotary encoder (I²C1)\ndtparam=i2c_arm=on\n' >>"$cfg"
+    fi
+    break
+  fi
+done
+if command -v raspi-config >/dev/null 2>&1; then
+  raspi-config nonint do_i2c 0 || true
+fi
+
 # Preserve logs across boots but cap their disk usage.
 mkdir -p /etc/systemd/journald.conf.d
 cat >/etc/systemd/journald.conf.d/minebox.conf <<'CONF'

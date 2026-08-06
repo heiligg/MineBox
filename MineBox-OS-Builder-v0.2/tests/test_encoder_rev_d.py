@@ -178,15 +178,15 @@ class EncoderRevDTests(unittest.TestCase):
             ROOT / "config" / "minebox.example.toml",
             ROOT / "config" / "hardware.example.toml",
         ).hardware
-        self.assertFalse(cfg.encoder_enabled)
+        self.assertTrue(cfg.encoder_enabled)
         self.assertEqual(cfg.encoder_type, "adafruit_seesaw")
         self.assertEqual(cfg.encoder_address, 0x36)
         self.assertEqual(cfg.encoder_i2c_bus, 1)
         self.assertEqual(cfg.encoder_interrupt_gpio, 24)
         self.assertEqual(cfg.encoder_debounce_ms, 15)
         self.assertEqual(cfg.encoder_long_press_ms, 700)
-        self.assertEqual(cfg.left_button.short_action, "prev")
-        self.assertEqual(cfg.right_button.long_action, "select")
+        self.assertEqual(cfg.left_button.short_action, "back")
+        self.assertEqual(cfg.right_button.long_action, "power")
 
     def test_driver_module_importable(self) -> None:
         from hardware.seesaw_encoder import SeesawEncoderConfig, SeesawEncoderDriver

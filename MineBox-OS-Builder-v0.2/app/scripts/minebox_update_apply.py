@@ -708,8 +708,48 @@ def install_networkmanager_polkit(target: Path, dev: bool) -> None:
     )
 
 
-def ensure_two_button_nav_config() -> None:
-    """Keep encoder off and restore classic button actions until Seesaw ships."""
+def ensure_i2c_enabled() -> None:
+    """Enable I²C1 for the Seesaw encoder (requires reboot if newly enabled)."""
+    for config_path in (
+        Path("/boot/firmware/config.txt"),
+        Path("/boot/config.txt"),
+    ):
+        if not config_path.is_file():
+            continue
+        try:
+            text = config_path.read_text(encoding="utf-8")
+        except OSError as exc:
+            print(f"warning: could not read {config_path}: {exc}", flush=True)
+            continue
+        original = text
+        # Uncomment a disabled stock line if present.
+        text = text.replace("#dtparam=i2c_arm=on", "dtparam=i2c_arm=on")
+        if "dtparam=i2c_arm=on" not in text:
+            text = text.rstrip() + "\n\n# MineBox: Seesaw rotary encoder (I²C1)\ndtparam=i2c_arm=on\n"
+        if text != original:
+            try:
+                config_path.write_text(text, encoding="utf-8")
+                print(
+                    f"Enabled dtparam=i2c_arm=on in {config_path} "
+                    "(reboot required if /dev/i2c-1 was missing).",
+                    flush=True,
+                )
+            except OSError as exc:
+                print(f"warning: could not write {config_path}: {exc}", flush=True)
+        break
+
+    # Best-effort live enable (still usually needs reboot for /dev/i2c-*).
+    subprocess.run(
+        ["raspi-config", "nonint", "do_i2c", "0"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+
+def ensure_encoder_rev_d_config() -> None:
+    """Enable Seesaw encoder + Rev D secondary button actions when configured."""
     path = Path("/etc/minebox/hardware.toml")
     if not path.is_file():
         return
@@ -730,30 +770,30 @@ def ensure_two_button_nav_config() -> None:
             continue
         if section == "[encoder]":
             if stripped.startswith("enabled"):
-                if "false" not in stripped.lower():
+                if "true" not in stripped.lower():
                     changed = True
-                out.append("enabled = false")
+                out.append("enabled = true")
                 continue
             if stripped.startswith("status"):
-                out.append('status = "NOT_CONFIGURED"')
+                out.append('status = "OK"')
                 changed = True
                 continue
         if section == "[buttons.left]":
             if stripped.startswith("short_action"):
-                out.append('short_action = "prev"')
+                out.append('short_action = "back"')
                 changed = True
                 continue
             if stripped.startswith("long_action"):
-                out.append('long_action = "back"')
+                out.append('long_action = "home"')
                 changed = True
                 continue
         if section == "[buttons.right]":
             if stripped.startswith("short_action"):
-                out.append('short_action = "next"')
+                out.append('short_action = "context"')
                 changed = True
                 continue
             if stripped.startswith("long_action"):
-                out.append('long_action = "select"')
+                out.append('long_action = "power"')
                 changed = True
                 continue
         out.append(line)
@@ -762,7 +802,10 @@ def ensure_two_button_nav_config() -> None:
         return
     try:
         path.write_text("\n".join(out) + "\n", encoding="utf-8")
-        print(f"Updated {path}: encoder disabled, two-button nav restored.", flush=True)
+        print(
+            f"Updated {path}: encoder enabled (Rev D), secondary button actions set.",
+            flush=True,
+        )
     except OSError as exc:
         print(f"warning: could not write {path}: {exc}", flush=True)
 
@@ -771,7 +814,8 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
     """Make /opt/minecraft writable by the minebox dashboard user."""
     if dev:
         return
-    ensure_two_button_nav_config()
+    ensure_i2c_enabled()
+    ensure_encoder_rev_d_config()
     install_networkmanager_polkit(target, dev)
     script = target / "scripts" / "minebox_fix_minecraft_perms.py"
     if script.is_file():

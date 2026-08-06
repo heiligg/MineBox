@@ -56,10 +56,9 @@ See `[encoder]` in `config/hardware.example.toml` / `/etc/minebox/hardware.toml`
 
 ```toml
 [encoder]
-# Keep disabled until the Seesaw (Product 5880) is installed.
-enabled = false
+enabled = true
 type = "adafruit_seesaw"
-status = "NOT_CONFIGURED"
+status = "OK"
 i2c_bus = 1
 address = 0x36
 interrupt_gpio = 24
@@ -68,8 +67,12 @@ debounce_ms = 15
 long_press_ms = 700
 ```
 
-While `enabled = false`, the dual front-panel buttons use the classic scheme:
-short left/right = prev/next, hold left = back, hold right = select.
+I²C must be enabled (`dtparam=i2c_arm=on` in `/boot/firmware/config.txt`). OTA apply
+enables this automatically; a reboot is required the first time.
+
+With the encoder enabled and connected, dual front-panel buttons use the Rev D
+secondary scheme: left short=back / hold=home; right short=context / hold=power.
+If the Seesaw is missing at boot, the UI falls back to two-button navigation.
 ---
 
 ## Events
