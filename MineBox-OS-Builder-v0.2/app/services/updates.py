@@ -454,6 +454,107 @@ def _dev_install_worker(target_commit: str | None) -> None:
         _append_log(f"Development update failed: {message}")
 
 
+def _heal_update_apply_script() -> bool:
+    """Repair known on-device apply bugs so OTA can start from an older tree.
+
+    The update service executes /opt/minebox/scripts/minebox_update_apply.py from
+    the *current* install. A NameError in that file aborts every update until
+    the script on disk is fixed — even if GitHub already has the correction.
+    """
+    path = APP_DIR / "scripts" / "minebox_update_apply.py"
+    if not path.is_file():
+        return False
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+
+    original = text
+    replacements = (
+        (
+            'sudoers_src = app_dir / "services" / "sudoers" / "minebox"',
+            'sudoers_src = target / "services" / "sudoers" / "minebox"',
+        ),
+        (
+            'render_script = app_dir / "scripts" / "minebox_render_hotspot_configs.py"',
+            'render_script = target / "scripts" / "minebox_render_hotspot_configs.py"',
+        ),
+        (
+            'env={**os.environ, "PYTHONPATH": str(app_dir)},',
+            'env={**os.environ, "PYTHONPATH": str(target)},',
+        ),
+    )
+    for old, new in replacements:
+        text = text.replace(old, new)
+
+    if text == original:
+        return False
+    try:
+        path.write_text(text, encoding="utf-8")
+    except OSError as exc:
+        _append_log(f"Could not heal update apply script: {exc}")
+        return False
+    _append_log("Healed minebox_update_apply.py (undefined app_dir → target).")
+    return True
+
+
+def _refresh_update_apply_script_from_github() -> bool:
+    """Best-effort: replace the on-device apply script with the GitHub tip copy."""
+    path = APP_DIR / "scripts" / "minebox_update_apply.py"
+    branch = update_branch()
+    subdir = app_subdir().strip("/").replace("\\", "/")
+    # app_subdir is like MineBox-OS-Builder-v0.2/app → script lives under scripts/
+    url = (
+        f"https://raw.githubusercontent.com/heiligg/MineBox/{branch}/"
+        f"{subdir}/scripts/minebox_update_apply.py"
+    )
+    try:
+        result = subprocess.run(
+            ["curl", "-fsSL", url],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        _append_log(f"Could not download fixed update apply script: {exc}")
+        return False
+    if result.returncode != 0 or not (result.stdout or "").strip():
+        detail = (result.stderr or result.stdout or "").strip()
+        _append_log(
+            "Could not download fixed update apply script: "
+            + (detail[:300] or f"exit {result.returncode}")
+        )
+        return False
+    body = result.stdout
+    if "def apply_update" not in body or "name 'app_dir'" in body:
+        # Sanity: must look like the apply script; refuse garbage/HTML.
+        if "def apply_update" not in body:
+            _append_log("Downloaded update apply script failed sanity check.")
+            return False
+    # Ensure the known bug is not present in what we write.
+    body = body.replace(
+        'sudoers_src = app_dir / "services" / "sudoers" / "minebox"',
+        'sudoers_src = target / "services" / "sudoers" / "minebox"',
+    )
+    body = body.replace(
+        'render_script = app_dir / "scripts" / "minebox_render_hotspot_configs.py"',
+        'render_script = target / "scripts" / "minebox_render_hotspot_configs.py"',
+    )
+    body = body.replace(
+        'env={**os.environ, "PYTHONPATH": str(app_dir)},',
+        'env={**os.environ, "PYTHONPATH": str(target)},',
+    )
+    try:
+        path.write_text(body, encoding="utf-8")
+        os.chmod(path, 0o755)
+    except OSError as exc:
+        _append_log(f"Could not write update apply script: {exc}")
+        return False
+    _append_log("Refreshed minebox_update_apply.py from GitHub before update.")
+    return True
+
+
 def install_update() -> dict[str, Any]:
     service_state = updater_service_state()
     if service_state["active_state"] == "activating":
@@ -469,6 +570,12 @@ def install_update() -> dict[str, Any]:
         raise UpdateError(
             "Could not determine the latest GitHub commit to install."
         )
+
+    # Repair / refresh the apply script before systemd starts it. Without this,
+    # an older on-device apply script can NameError mid-update and roll back forever.
+    healed = _heal_update_apply_script()
+    if not healed:
+        _refresh_update_apply_script_from_github()
 
     if _dev_mode():
         thread = threading.Thread(

@@ -824,7 +824,7 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
 
     # Canonical sudoers from app tree (Checkpoint 7 — avoid drift with install.sh / pi-gen).
     sudoers = Path("/etc/sudoers.d/minebox")
-    sudoers_src = app_dir / "services" / "sudoers" / "minebox"
+    sudoers_src = target / "services" / "sudoers" / "minebox"
     desired = ""
     current = ""
     try:
@@ -850,7 +850,9 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
                 text=True,
                 timeout=30,
             )
-            if check.returncode != 0:
+            if check.returncode == 0:
+                print("Synced /etc/sudoers.d/minebox from app tree.", flush=True)
+            else:
                 print(
                     "warning: sudoers validation failed: "
                     + (check.stderr or check.stdout or ""),
@@ -860,7 +862,7 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
             print(f"warning: could not write sudoers: {exc}", flush=True)
 
     # Re-render SoftAP configs after update (idempotent; preserves resolved iface).
-    render_script = app_dir / "scripts" / "minebox_render_hotspot_configs.py"
+    render_script = target / "scripts" / "minebox_render_hotspot_configs.py"
     if render_script.is_file():
         subprocess.run(
             ["/usr/bin/python3", str(render_script)],
@@ -868,7 +870,7 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
             capture_output=True,
             text=True,
             timeout=60,
-            env={**os.environ, "PYTHONPATH": str(app_dir)},
+            env={**os.environ, "PYTHONPATH": str(target)},
         )
 
 
