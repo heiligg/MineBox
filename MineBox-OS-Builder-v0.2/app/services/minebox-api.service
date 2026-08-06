@@ -27,7 +27,8 @@ NoNewPrivileges=false
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=false
-ReadWritePaths=/opt/minebox /opt/minecraft /var/lib/minebox /var/log/minebox /home/minebox /etc/minebox
+# /opt/java is used by minebox-ensure-java (Temurin) when apt has no matching JDK.
+ReadWritePaths=/opt/minebox /opt/minecraft /opt/java /var/lib/minebox /var/log/minebox /home/minebox /etc/minebox
 
 [Install]
 WantedBy=multi-user.target

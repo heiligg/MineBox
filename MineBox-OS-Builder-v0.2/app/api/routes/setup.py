@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
@@ -160,7 +161,20 @@ def create_server(request: CreateServerRequest):
             servers.remove_server_record(instance.server_id)
         raise HTTPException(status_code=400, detail=str(error)) from error
 
-    except OSError as error:
+    except subprocess.TimeoutExpired as error:
+        if server_dir is not None:
+            shutil.rmtree(server_dir, ignore_errors=True)
+        if instance is not None:
+            servers.remove_server_record(instance.server_id)
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                "Server install timed out. Forge/NeoForge needs a stable "
+                "internet link and can take several minutes."
+            ),
+        ) from error
+
+    except (OSError, RuntimeError) as error:
         if server_dir is not None:
             shutil.rmtree(server_dir, ignore_errors=True)
         if instance is not None:

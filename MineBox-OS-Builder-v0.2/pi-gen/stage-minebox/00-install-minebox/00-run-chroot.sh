@@ -65,6 +65,18 @@ visudo -cf /etc/sudoers.d/minebox
 if [ -f /opt/minebox/scripts/minebox_ensure_tls.py ]; then
   install -m 0755 /opt/minebox/scripts/minebox_ensure_tls.py /usr/local/sbin/minebox-ensure-tls
 fi
+if [ -f /opt/minebox/scripts/minebox_ensure_java.py ]; then
+  install -m 0755 /opt/minebox/scripts/minebox_ensure_java.py /usr/local/sbin/minebox-ensure-java
+  # Preinstall Java 8 for Forge 1.12.x (Bookworm/Trixie often lack apt openjdk-8).
+  /usr/bin/python3 /opt/minebox/scripts/minebox_ensure_java.py --min 8 --max 8 \
+    || echo "WARNING: Java 8 preinstall failed (continuing; on-device ensure-java can retry)"
+fi
+if [ -f /opt/minebox/scripts/minebox_fix_minecraft_perms.py ]; then
+  install -m 0755 /opt/minebox/scripts/minebox_fix_minecraft_perms.py /usr/local/sbin/minebox-fix-minecraft-perms
+fi
+if [ -f /opt/minebox/scripts/minebox_install_avahi.py ]; then
+  install -m 0755 /opt/minebox/scripts/minebox_install_avahi.py /usr/local/sbin/minebox-install-avahi
+fi
 if [ -f /opt/minebox/scripts/minebox_api_run.py ]; then
   chmod 0755 /opt/minebox/scripts/minebox_api_run.py
 fi

@@ -140,6 +140,12 @@ class InstallerReleaseTests(unittest.TestCase):
         self.assertRegex(text, r"(?m)^minebox ALL=\(root\) NOPASSWD:")
         self.assertIn("NOPASSWD:", text)
         self.assertNotIn("ALL=(ALL) NOPASSWD: ALL", text)
+        # Args must be explicitly allowed (sudo treats script path as an argument).
+        self.assertIn(
+            "/usr/bin/python3 /opt/minebox/scripts/minebox_ensure_java.py *",
+            text,
+        )
+        self.assertIn("/usr/local/sbin/minebox-ensure-java *", text)
 
     def test_systemd_units_parse_keys(self) -> None:
         for name in (

@@ -105,7 +105,11 @@ def _download_bytes(
 def _java_for(version_id: str) -> str:
     from services.launcher import _find_java
 
-    return _find_java(version_id)
+    try:
+        return _find_java(version_id)
+    except RuntimeError as error:
+        # Surface as DownloadError so /setup/create returns a useful detail.
+        raise DownloadError(str(error)) from error
 
 
 def version_manifest() -> dict[str, Any]:
@@ -598,14 +602,21 @@ def _install_forge(
     _download_bytes(installer_url, installer_jar, timeout=600)
 
     java = _java_for(version_id)
-    result = subprocess.run(
-        [java, "-jar", str(installer_jar), "--installServer"],
-        cwd=server_dir,
-        capture_output=True,
-        text=True,
-        timeout=900,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [java, "-jar", str(installer_jar), "--installServer"],
+            cwd=server_dir,
+            capture_output=True,
+            text=True,
+            timeout=900,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        installer_jar.unlink(missing_ok=True)
+        raise DownloadError(
+            "Forge installer timed out after 15 minutes. "
+            "Check internet on the Pi and try again."
+        ) from error
     installer_jar.unlink(missing_ok=True)
     # Forge leaves installer logs behind; ignore return code slightly if files exist.
     unix_args = list(
@@ -735,14 +746,21 @@ def _install_neoforge(
     _download_bytes(installer_url, installer_jar, timeout=600)
 
     java = _java_for(version_id)
-    result = subprocess.run(
-        [java, "-jar", str(installer_jar), "--installServer"],
-        cwd=server_dir,
-        capture_output=True,
-        text=True,
-        timeout=900,
-        check=False,
-    )
+    try:
+        result = subprocess.run(
+            [java, "-jar", str(installer_jar), "--installServer"],
+            cwd=server_dir,
+            capture_output=True,
+            text=True,
+            timeout=900,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        installer_jar.unlink(missing_ok=True)
+        raise DownloadError(
+            "NeoForge installer timed out after 15 minutes. "
+            "Check internet on the Pi and try again."
+        ) from error
     installer_jar.unlink(missing_ok=True)
 
     unix_args = list(

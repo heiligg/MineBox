@@ -794,7 +794,9 @@
 
                     <p class="description">
                         Check these settings before MineBox downloads and
-                        installs the server.
+                        installs the server. Forge/NeoForge can take several
+                        minutes and needs a working internet connection on
+                        the Pi (Wi‑Fi or Ethernet — SoftAP alone is not enough).
                     </p>
 
                     <div class="summary">
@@ -1004,18 +1006,36 @@
 
         async function readResponse(response) {
             let data = {};
+            const raw = await response.text();
 
             try {
-                data = await response.json();
+                data = raw ? JSON.parse(raw) : {};
             } catch {
                 data = {};
             }
 
             if (!response.ok) {
-                let message = data.detail || "The request failed.";
+                let message = data.detail;
 
-                if (typeof message === "object") {
+                if (typeof message === "object" && message !== null) {
                     message = JSON.stringify(message);
+                }
+
+                if (!message) {
+                    if (response.status === 502 || response.status === 504) {
+                        message =
+                            "Install timed out or the API restarted. " +
+                            "Forge needs internet and can take several minutes — try again.";
+                    } else if (response.status === 403) {
+                        message =
+                            "Request blocked. Refresh the page and try again.";
+                    } else if (!raw) {
+                        message =
+                            `The request failed (HTTP ${response.status}). ` +
+                            "If this is Forge, confirm the Pi has internet (not SoftAP-only).";
+                    } else {
+                        message = `The request failed (HTTP ${response.status}).`;
+                    }
                 }
 
                 throw new Error(message);
@@ -1475,10 +1495,19 @@
                 showStep(4);
                 button.disabled = false;
 
-                showError(
-                    "create-error",
-                    error.message
-                );
+                let message = error && error.message
+                    ? error.message
+                    : "The request failed.";
+                if (
+                    /failed to fetch|networkerror|load failed/i.test(message)
+                ) {
+                    message =
+                        "Could not reach MineBox during install. " +
+                        "Forge downloads are long — keep this page open, " +
+                        "ensure the Pi has internet, then try again.";
+                }
+
+                showError("create-error", message);
             }
         }
 
