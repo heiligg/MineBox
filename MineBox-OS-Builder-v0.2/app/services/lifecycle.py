@@ -190,14 +190,20 @@ class MinecraftLifecycleManager:
                 _done("already starting")
                 return CommandResult(False, stderr="Minecraft is already starting.")
             if self._machine.value is MinecraftState.CRASHED:
-                _done("crashed")
-                return CommandResult(
-                    False,
-                    stderr=(
-                        "Server is CRASHED. Call recover() or POST "
-                        "/api/v1/minecraft/recover before starting."
-                    ),
+                # Appliance UX: Start clears CRASHED and retries (same as recover).
+                self._machine.transition(
+                    MinecraftState.STOPPED,
+                    reason="auto_recover_on_start",
+                    force=True,
                 )
+                self._last_error = None
+                self._persist()
+                try:
+                    from services import crash_recovery
+
+                    crash_recovery.reset_attempts()
+                except Exception:
+                    pass
             if not self._installed():
                 self._machine.transition(
                     MinecraftState.NOT_INSTALLED, reason="no server", force=True

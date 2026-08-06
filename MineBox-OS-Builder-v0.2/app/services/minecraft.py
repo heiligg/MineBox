@@ -482,7 +482,24 @@ def restart() -> CommandResult:
 
 
 def status_text() -> str:
-    return "Online" if is_running() else "Offline"
+    if is_running():
+        return "Online"
+    try:
+        from services.lifecycle import get_lifecycle
+
+        state = get_lifecycle().snapshot().get("state") or {}
+        value = state.get("value") if isinstance(state, dict) else None
+        if value == "CRASHED":
+            return "Crashed"
+        if value == "ERROR":
+            return "Error"
+        if value == "STARTING":
+            return "Starting"
+        if value == "STOPPING":
+            return "Stopping"
+    except Exception:
+        pass
+    return "Offline"
 
 
 def player_info() -> tuple[list[str], int] | None:

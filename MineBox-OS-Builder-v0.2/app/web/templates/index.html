@@ -336,6 +336,11 @@
             background: rgba(255, 199, 95, 0.09);
         }
 
+        .control-button.recover {
+            border-color: rgba(120, 180, 255, 0.4);
+            background: rgba(120, 180, 255, 0.1);
+        }
+
         .quick-stats {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1556,6 +1561,16 @@
                         >
                             ↻ Restart
                         </button>
+
+                        <button
+                            type="button"
+                            class="control-button recover"
+                            data-action="recover"
+                            id="recover-button"
+                            hidden
+                        >
+                            ↺ Recover
+                        </button>
                     </div>
 
                     <div
@@ -2430,9 +2445,19 @@
 
             statusLight.classList.toggle("online", running);
 
+            const statusLower = String(minecraft.status || "").toLowerCase();
+            const crashed =
+                statusLower === "crashed" || statusLower === "error";
+            const recoverButton = document.getElementById("recover-button");
+            if (recoverButton) {
+                recoverButton.hidden = running || !crashed;
+            }
+
             serverDescription.textContent = running
                 ? "The Minecraft server is running normally."
-                : "The Minecraft server is currently stopped.";
+                : crashed
+                  ? "Server crashed. Use Recover or Start after fixing the cause (often Java)."
+                  : "The Minecraft server is currently stopped.";
 
             playersValue.textContent =
                 minecraft.players ?? "Unknown";
@@ -3522,20 +3547,33 @@
         }
 
         async function runAction(action) {
-            if (action === "stop" || action === "restart") {
+            if (action === "stop" || action === "restart" || action === "recover") {
                 const confirmed = window.confirm(
                     action === "stop"
                         ? "Stop the Minecraft server now?\n\nPlayers will be disconnected."
-                        : "Restart the Minecraft server now?\n\nPlayers will be disconnected briefly."
+                        : action === "restart"
+                          ? "Restart the Minecraft server now?\n\nPlayers will be disconnected briefly."
+                          : "Recover from a crashed state and start the Minecraft server?"
                 );
                 if (!confirmed) {
                     return;
                 }
             }
 
+            // If Start is pressed while crashed, use recover (clears lock + starts).
+            let effectiveAction = action;
+            if (
+                action === "start" &&
+                String(statusText.textContent || "")
+                    .toLowerCase()
+                    .includes("crash")
+            ) {
+                effectiveAction = "recover";
+            }
+
             setButtonsDisabled(true);
             showActionMessage(
-                `${action[0].toUpperCase()}${action.slice(1)}ing server...`
+                `${effectiveAction[0].toUpperCase()}${effectiveAction.slice(1)}ing server...`
             );
 
             try {
@@ -3544,11 +3582,11 @@
                     "Content-Type": "application/json"
                 };
                 const needsConfirm =
-                    action === "stop" ||
-                    action === "restart" ||
-                    action === "recover";
+                    effectiveAction === "stop" ||
+                    effectiveAction === "restart" ||
+                    effectiveAction === "recover";
                 const response = await fetch(
-                    `/api/v1/minecraft/${action}`,
+                    `/api/v1/minecraft/${effectiveAction}`,
                     {
                         method: "POST",
                         headers,
@@ -3565,7 +3603,7 @@
                 }
 
                 showActionMessage(
-                    data.message || `Server ${action} completed.`,
+                    data.message || `Server ${effectiveAction} completed.`,
                     "success"
                 );
 
