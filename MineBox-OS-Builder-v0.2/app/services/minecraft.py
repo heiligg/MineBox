@@ -364,14 +364,19 @@ def start_service() -> CommandResult:
             rcon_service.ensure_properties(Path(active.directory))
     except Exception:
         pass
-    # Install matching Java (8/17/21) before systemd start so long downloads
-    # are not killed by service start timeouts.
+    # Prefer installing Java before systemd start when sudo works. If it fails
+    # (common when sudoers lacks ensure-java args), continue — minecraft.service
+    # ExecStartPre=+ runs the same ensure as root.
     try:
         from services.launcher import ensure_runtime_for_active
 
         ensure_runtime_for_active()
     except Exception as error:
-        return CommandResult(False, stderr=str(error))
+        print(
+            f"WARNING: pre-start Java ensure failed ({error}); "
+            "systemd ExecStartPre will retry as root.",
+            flush=True,
+        )
     if _dev_mode():
         return _dev_start()
     result = _service("start")

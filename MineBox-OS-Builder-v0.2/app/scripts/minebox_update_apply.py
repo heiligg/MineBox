@@ -725,13 +725,17 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
             ]
         )
         # Preinstall Java 8 during OTA — Bookworm has no apt package and Forge
-        # 1.12 needs it. Other majors install on demand via sudo.
+        # 1.12 needs it. Other majors install on demand via sudo / ExecStartPre.
         print("Ensuring Java 8 runtime for legacy Forge...", flush=True)
         subprocess.run(
             ["/usr/bin/python3", str(java_script), "--min", "8", "--max", "8"],
             check=False,
             timeout=900,
         )
+
+    java_active = target / "scripts" / "minebox_ensure_java_for_active.py"
+    if java_active.is_file():
+        run(["chmod", "0755", str(java_active)])
 
     tls_script = target / "scripts" / "minebox_ensure_tls.py"
     if tls_script.is_file():

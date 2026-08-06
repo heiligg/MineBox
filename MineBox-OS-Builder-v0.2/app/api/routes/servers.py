@@ -61,9 +61,35 @@ def select_active_server(request: SelectServerRequest):
         target = servers.get_server(request.server_id)
         current = servers.active_server()
         if current and current.server_id == target.server_id:
+            # Same server selected: still ensure Java and try to bring it up.
+            try:
+                from services.launcher import ensure_runtime_for_active
+
+                ensure_runtime_for_active()
+            except Exception as java_exc:  # noqa: BLE001
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Could not prepare Java for '{target.name}': {java_exc}",
+                ) from java_exc
+            if not minecraft.is_running():
+                result = minecraft.start()
+                if not result.ok:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=result.stderr or "Could not start the selected server.",
+                    )
+                return {
+                    "success": True,
+                    "message": (
+                        f"'{target.name}' is active; Java was prepared and "
+                        "the server was started."
+                    ),
+                    "server": _serialize(target, target.server_id),
+                    "restarted": True,
+                }
             return {
                 "success": True,
-                "message": f"'{target.name}' is already active.",
+                "message": f"'{target.name}' is already active and running.",
                 "server": _serialize(target, target.server_id),
                 "restarted": False,
             }
@@ -72,20 +98,46 @@ def select_active_server(request: SelectServerRequest):
         if was_running:
             result = minecraft.stop()
             if not result.ok:
-                raise HTTPException(status_code=500, detail=result.stderr or "Could not stop Minecraft.")
+                raise HTTPException(
+                    status_code=500,
+                    detail=result.stderr or "Could not stop Minecraft.",
+                )
 
         instance = servers.set_active_server(target.server_id)
 
-        if was_running:
-            result = minecraft.start()
-            if not result.ok:
-                raise HTTPException(status_code=500, detail=result.stderr or "Could not start the selected server.")
+        # Always prepare the Java runtime for this server's version, then start.
+        try:
+            from services.launcher import ensure_runtime_for_active
+
+            ensure_runtime_for_active()
+        except Exception as java_exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Switched to '{instance.name}', but Java install failed: "
+                    f"{java_exc}"
+                ),
+            ) from java_exc
+
+        result = minecraft.start()
+        if not result.ok:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"Switched to '{instance.name}', but start failed: "
+                    f"{result.stderr or 'unknown error'}"
+                ),
+            )
 
         return {
             "success": True,
-            "message": f"'{instance.name}' is now the active server.",
+            "message": (
+                f"'{instance.name}' is now active"
+                + (" (previous server stopped)" if was_running else "")
+                + "; Java prepared and server started."
+            ),
             "server": _serialize(instance, instance.server_id),
-            "restarted": was_running,
+            "restarted": True,
         }
     except HTTPException:
         raise

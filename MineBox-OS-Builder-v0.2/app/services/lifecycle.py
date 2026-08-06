@@ -24,6 +24,20 @@ from services.system import CommandResult
 LOGGER = logging.getLogger("minebox.lifecycle")
 
 
+def _looks_like_java_problem(detail: str) -> bool:
+    text = (detail or "").lower()
+    needles = (
+        "java",
+        "jdk",
+        "temurin",
+        "minebox-ensure-java",
+        "automatic java install",
+        "no compatible java",
+        "needs java",
+    )
+    return any(token in text for token in needles)
+
+
 def _runtime_dir() -> Path:
     return Path(os.environ.get("MINEBOX_RUNTIME_DIR", "/var/lib/minebox"))
 
@@ -222,6 +236,24 @@ class MinecraftLifecycleManager:
         if op is not None:
             coordinator.update(op.id, progress=0.2, step="service_start")
         result = mc.start_service()
+        # If Java was missing, install may have failed via sudo before systemd
+        # ExecStartPre could run — retry once after a direct ensure attempt.
+        if not result.ok and _looks_like_java_problem(result.stderr or ""):
+            if op is not None:
+                coordinator.update(op.id, progress=0.3, step="ensure_java")
+            try:
+                from services.launcher import ensure_runtime_for_active
+
+                ensure_runtime_for_active()
+                result = mc.start_service()
+            except Exception as java_exc:  # noqa: BLE001
+                result = CommandResult(
+                    False,
+                    stderr=(
+                        (result.stderr or "Start failed.")
+                        + f" | Java prepare: {java_exc}"
+                    ),
+                )
         if not result.ok:
             with self._lock:
                 self._last_error = redact_secrets(result.stderr or "start failed")
