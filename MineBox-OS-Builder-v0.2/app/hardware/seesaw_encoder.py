@@ -124,11 +124,16 @@ class SeesawEncoderDriver:
         with self._lock:
             self._last_connect_attempt = time.monotonic()
             self.close_unlocked()
+        # I²C probes are slow when the device is absent. Never hold _lock across
+        # them — snapshot/health diagnostics take the same lock.
+        ok = False
+        try:
+            ok = self._try_blinka() or self._try_smbus()
+        except Exception as exc:  # noqa: BLE001
+            with self._lock:
+                self._last_error = f"Seesaw connect failed: {exc}"
             ok = False
-            if self._try_blinka():
-                ok = True
-            elif self._try_smbus():
-                ok = True
+        with self._lock:
             if ok:
                 self._backoff_s = float(self.config.reconnect_interval_s)
             else:
@@ -136,7 +141,7 @@ class SeesawEncoderDriver:
                     _RECONNECT_BACKOFF_MAX_S,
                     max(self._backoff_s * 2.0, float(self.config.reconnect_interval_s)),
                 )
-            return ok
+        return ok
 
     def close(self) -> None:
         with self._lock:
@@ -210,9 +215,10 @@ class SeesawEncoderDriver:
             )
             return True
         except Exception as exc:  # noqa: BLE001
-            self._last_error = f"Blinka Seesaw init failed: {exc}"
-            LOGGER.warning(self._last_error)
-            self.close_unlocked()
+            with self._lock:
+                self._last_error = f"Blinka Seesaw init failed: {exc}"
+                self.close_unlocked()
+            LOGGER.warning("Blinka Seesaw init failed: %s", exc)
             return False
 
     def _try_smbus(self) -> bool:
@@ -267,18 +273,21 @@ class SeesawEncoderDriver:
             )
             return True
         except Exception as exc:  # noqa: BLE001
-            self._last_error = f"smbus2 Seesaw init failed: {exc}"
-            # Avoid flooding the journal / starving the API when the encoder is absent.
-            if self._backoff_s <= float(self.config.reconnect_interval_s) * 2:
-                LOGGER.warning(self._last_error)
+            with self._lock:
+                self._last_error = f"smbus2 Seesaw init failed: {exc}"
+                # Avoid flooding the journal / starving the API when the encoder is absent.
+                log_warning = self._backoff_s <= float(self.config.reconnect_interval_s) * 2
+            if log_warning:
+                LOGGER.warning("smbus2 Seesaw init failed: %s", exc)
             else:
-                LOGGER.debug(self._last_error)
+                LOGGER.debug("smbus2 Seesaw init failed: %s", exc)
             try:
                 if "bus" in locals():
                     bus.close()
             except Exception:  # noqa: BLE001
                 pass
-            self.close_unlocked()
+            with self._lock:
+                self.close_unlocked()
             return False
 
     def _setup_interrupt_gpio(self) -> None:
