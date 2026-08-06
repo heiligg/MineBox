@@ -603,10 +603,38 @@ def install_hotspot_helpers(target: Path, dev: bool) -> None:
         restart_dnsmasq_safe()
 
 
+def ensure_gpio_access() -> None:
+    """Make sure the minebox user can open /dev/gpiochip* for the buttons."""
+    for group in ("gpio", "input"):
+        subprocess.run(
+            ["getent", "group", group],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    result = subprocess.run(
+        ["/usr/sbin/usermod", "-aG", "gpio,input", "minebox"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        print(
+            f"warning: could not add minebox to gpio/input groups: {detail}",
+            flush=True,
+        )
+    else:
+        print("Ensured minebox is in gpio,input groups.", flush=True)
+
+
 def install_systemd_units(target: Path, dev: bool) -> None:
     """Refresh MineBox unit files from the installed app tree."""
     if dev:
         return
+    ensure_gpio_access()
     units = [
         "minebox-api.service",
         "minebox-update.service",

@@ -40,7 +40,10 @@ When the Seesaw encoder is enabled and connected, buttons switch to secondary Re
 
 Timing defaults: debounce 40 ms, long-press 450 ms, lockout 150 ms.
 
-`minebox-api` must be in the `gpio` group (see `minebox-api.service`) or button claims fail silently.
+`minebox-api` must run with `SupplementaryGroups=gpio input` (and the `minebox`
+user in those groups) or button claims fail silently. Do not add `DeviceAllow=`
+for specific gpiochips — that closes the device policy and can hide the chip
+gpiozero/lgpio needs on some Pi 5 kernels.
 ---
 
 ## Encoder (Adafruit 5880 — Seesaw I²C)

@@ -571,11 +571,11 @@ def install_update() -> dict[str, Any]:
             "Could not determine the latest GitHub commit to install."
         )
 
-    # Repair / refresh the apply script before systemd starts it. Without this,
-    # an older on-device apply script can NameError mid-update and roll back forever.
-    healed = _heal_update_apply_script()
-    if not healed:
-        _refresh_update_apply_script_from_github()
+    # Always prefer the GitHub tip apply script so OTA picks up unit/GPIO heals
+    # (e.g. SupplementaryGroups=gpio). Fall back to in-place NameError patches.
+    refreshed = _refresh_update_apply_script_from_github()
+    if not refreshed:
+        _heal_update_apply_script()
 
     if _dev_mode():
         thread = threading.Thread(

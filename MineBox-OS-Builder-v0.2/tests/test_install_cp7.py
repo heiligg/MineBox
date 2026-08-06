@@ -101,6 +101,9 @@ class SystemdOrderingTests(unittest.TestCase):
         self.assertIn("After=", api)
         self.assertIn("StartLimitBurst=", api)
         self.assertIn("Restart=on-failure", api)
+        self.assertIn("SupplementaryGroups=gpio input", api)
+        self.assertNotIn("DeviceAllow=", api)
+        self.assertIn("usermod -aG gpio,input minebox", api)
 
     def test_captive_after_api_hostapd(self) -> None:
         captive = _read(APP / "services" / "minebox-captive.service")

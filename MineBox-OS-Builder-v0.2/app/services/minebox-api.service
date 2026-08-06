@@ -11,10 +11,13 @@ StartLimitBurst=8
 Type=simple
 User=minebox
 Group=minebox
+# gpio/input: required for gpiozero/lgpio on /dev/gpiochip* (physical buttons).
 SupplementaryGroups=gpio input
 WorkingDirectory=/opt/minebox
 Environment=PYTHONPATH=/opt/minebox
 Environment=PYTHONUNBUFFERED=1
+# Keep minebox in gpio/input even on older images that never ran usermod.
+ExecStartPre=+/usr/sbin/usermod -aG gpio,input minebox
 ExecStartPre=+/usr/bin/python3 /opt/minebox/scripts/minebox_fix_minecraft_perms.py
 ExecStart=/usr/bin/python3 /opt/minebox/scripts/minebox_api_run.py
 Restart=on-failure
@@ -30,10 +33,8 @@ ProtectSystem=full
 ProtectHome=false
 # /opt/java is used by minebox-ensure-java (Temurin) when apt has no matching JDK.
 ReadWritePaths=/opt/minebox /opt/minecraft /opt/java /var/lib/minebox /var/log/minebox /home/minebox /etc/minebox
-# Allow gpiozero / lgpio access to the Pi GPIO character device.
-DeviceAllow=/dev/gpiochip0 rw
-DeviceAllow=/dev/gpiochip1 rw
-DeviceAllow=/dev/gpiomem rw
+# Do NOT set DeviceAllow= here: it implies DevicePolicy=closed and can hide
+# /dev/gpiochip4 (older Pi 5 kernels) or other chips gpiozero needs.
 
 [Install]
 WantedBy=multi-user.target

@@ -221,7 +221,6 @@
         installButton.disabled =
             requestRunning ||
             updateRunning ||
-            !data.update_available ||
             Boolean(data.local_changes) ||
             !data.repository_available;
 
@@ -231,7 +230,9 @@
         installButton.textContent =
             updateRunning
                 ? "Update Running…"
-                : "Install Update";
+                : data.update_available
+                    ? "Install Update"
+                    : "Reinstall / Repair";
 
         refreshNote.textContent =
             `Updated ${new Date().toLocaleTimeString([], {
@@ -341,8 +342,12 @@
         }
 
         const confirmed = window.confirm(
-            "Install the available MineBox update now? " +
-            "The MineBox web service may briefly restart."
+            (installButton.textContent || "").includes("Repair")
+                ? "Reinstall the current MineBox tip from GitHub? " +
+                  "This refreshes services and config (buttons/GPIO). " +
+                  "The web service may briefly restart."
+                : "Install the available MineBox update now? " +
+                  "The MineBox web service may briefly restart."
         );
 
         if (!confirmed) {
