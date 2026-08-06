@@ -36,6 +36,8 @@ _ENCODER_DELTA = 0x40
 _SS_SWITCH_PIN = 24
 _DEFAULT_ADDR = 0x36
 _RECONNECT_INTERVAL_S = 2.0
+_RECONNECT_BACKOFF_MAX_S = 60.0
+_FULL_SCAN_INTERVAL_S = 300.0
 
 
 @dataclass
@@ -50,7 +52,12 @@ class SeesawEncoderConfig:
 
 
 class SeesawEncoderDriver:
-    """Thread-safe Seesaw encoder reader with auto-reconnect."""
+    """Thread-safe Seesaw encoder reader with auto-reconnect.
+
+    Missing hardware must never block the MineBox API. Reconnect uses
+    exponential backoff and avoids scanning the full address range on every
+    attempt (I²C NACKs are slow and were starving uvicorn).
+    """
 
     def __init__(self, config: SeesawEncoderConfig | None = None) -> None:
         self.config = config or SeesawEncoderConfig()
@@ -61,6 +68,8 @@ class SeesawEncoderDriver:
         self._seesaw: Any = None
         self._last_error: str | None = None
         self._last_connect_attempt = 0.0
+        self._backoff_s = float(self.config.reconnect_interval_s)
+        self._last_full_scan = 0.0
         self._pending_delta = 0
         self._press = False
         self._int_btn = None
@@ -91,9 +100,19 @@ class SeesawEncoderDriver:
         with self._lock:
             self._last_connect_attempt = time.monotonic()
             self.close_unlocked()
+            ok = False
             if self._try_blinka():
-                return True
-            return self._try_smbus()
+                ok = True
+            elif self._try_smbus():
+                ok = True
+            if ok:
+                self._backoff_s = float(self.config.reconnect_interval_s)
+            else:
+                self._backoff_s = min(
+                    _RECONNECT_BACKOFF_MAX_S,
+                    max(self._backoff_s * 2.0, float(self.config.reconnect_interval_s)),
+                )
+            return ok
 
     def close(self) -> None:
         with self._lock:
@@ -116,6 +135,20 @@ class SeesawEncoderDriver:
             self._bus = None
         self._connected = False
         self._backend = None
+
+    def _address_candidates(self) -> list[int]:
+        """Configured address first; full 0x36-0x3D scan only periodically."""
+        primary = int(self.config.address)
+        now = time.monotonic()
+        do_full = (now - self._last_full_scan) >= _FULL_SCAN_INTERVAL_S
+        if not do_full and self._last_full_scan > 0:
+            return [primary]
+        self._last_full_scan = now
+        addrs = [primary]
+        for candidate in range(0x36, 0x3E):
+            if candidate not in addrs:
+                addrs.append(candidate)
+        return addrs
 
     def _try_blinka(self) -> bool:
         try:
@@ -167,12 +200,7 @@ class SeesawEncoderDriver:
             return False
 
         try:
-            # Probe configured address, then scan Product 5880 jumper range.
-            addrs = [self.config.address]
-            for candidate in range(0x36, 0x3E):
-                if candidate not in addrs:
-                    addrs.append(candidate)
-
+            addrs = self._address_candidates()
             bus = SMBus(self.config.i2c_bus)
             hw_id = None
             used_addr = self.config.address
@@ -185,7 +213,8 @@ class SeesawEncoderDriver:
             if hw_id is None:
                 self.config.address = used_addr
                 raise OSError(
-                    f"no response to Seesaw HW_ID on 0x36-0x3D bus={self.config.i2c_bus}"
+                    f"no response to Seesaw HW_ID "
+                    f"(probed {[hex(a) for a in addrs]}) bus={self.config.i2c_bus}"
                 )
             self.config.address = used_addr
             # Soft reset then configure switch pull-up + encoder IRQ.
@@ -215,7 +244,11 @@ class SeesawEncoderDriver:
             return True
         except Exception as exc:  # noqa: BLE001
             self._last_error = f"smbus2 Seesaw init failed: {exc}"
-            LOGGER.warning(self._last_error)
+            # Avoid flooding the journal / starving the API when the encoder is absent.
+            if self._backoff_s <= float(self.config.reconnect_interval_s) * 2:
+                LOGGER.warning(self._last_error)
+            else:
+                LOGGER.debug(self._last_error)
             try:
                 if "bus" in locals():
                     bus.close()
@@ -238,17 +271,23 @@ class SeesawEncoderDriver:
             self._int_btn = None
 
     def _maybe_reconnect(self) -> None:
-        if self._connected:
-            return
-        now = time.monotonic()
-        if (now - self._last_connect_attempt) < self.config.reconnect_interval_s:
-            return
+        """Reconnect off the critical path when possible; never spin every poll."""
+        with self._lock:
+            if self._connected:
+                return
+            now = time.monotonic()
+            if (now - self._last_connect_attempt) < self._backoff_s:
+                return
+            # Claim the attempt slot before releasing the lock so concurrent
+            # pollers do not stampede into blocking I²C probes.
+            self._last_connect_attempt = now
+        # Connect takes the lock itself; do not hold it across slow I²C.
         self.connect()
 
     def poll(self) -> tuple[int, bool]:
         """Read rotation delta (signed steps) and pressed state. Safe if missing."""
+        self._maybe_reconnect()
         with self._lock:
-            self._maybe_reconnect()
             if not self._connected:
                 return 0, False
             try:
@@ -274,9 +313,8 @@ class SeesawEncoderDriver:
 
     def read_press(self) -> bool:
         # Prefer last poll cache; also allow direct read.
+        self._maybe_reconnect()
         with self._lock:
-            if not self._connected:
-                self._maybe_reconnect()
             if not self._connected:
                 return False
             try:
@@ -318,7 +356,7 @@ class SeesawEncoderDriver:
 
         write = i2c_msg.write(self.config.address, bytes([reg_base, reg]))
         bus.i2c_rdwr(write)
-        time.sleep(0.008)
+        time.sleep(0.001)
         read = i2c_msg.read(self.config.address, length)
         bus.i2c_rdwr(read)
         return bytes(read)
