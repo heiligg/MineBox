@@ -74,7 +74,31 @@ class SeesawEncoderDriver:
         self._press = False
         self._int_btn = None
         self._ever_connected = False
-        self.connect()
+        self._connecting = False
+        # Never block the API process on a missing encoder at import/start.
+        self._schedule_connect()
+
+    def _schedule_connect(self) -> None:
+        with self._lock:
+            if self._connected or self._connecting:
+                return
+            self._connecting = True
+            self._last_connect_attempt = time.monotonic()
+
+        def worker() -> None:
+            try:
+                self.connect()
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.debug("Seesaw connect worker failed: %s", exc)
+            finally:
+                with self._lock:
+                    self._connecting = False
+
+        threading.Thread(
+            target=worker,
+            name="minebox-seesaw-connect",
+            daemon=True,
+        ).start()
 
     @property
     def connected(self) -> bool:
@@ -271,18 +295,14 @@ class SeesawEncoderDriver:
             self._int_btn = None
 
     def _maybe_reconnect(self) -> None:
-        """Reconnect off the critical path when possible; never spin every poll."""
+        """Kick a background reconnect; never block the dashboard request path."""
         with self._lock:
-            if self._connected:
+            if self._connected or self._connecting:
                 return
             now = time.monotonic()
             if (now - self._last_connect_attempt) < self._backoff_s:
                 return
-            # Claim the attempt slot before releasing the lock so concurrent
-            # pollers do not stampede into blocking I²C probes.
-            self._last_connect_attempt = now
-        # Connect takes the lock itself; do not hold it across slow I²C.
-        self.connect()
+        self._schedule_connect()
 
     def poll(self) -> tuple[int, bool]:
         """Read rotation delta (signed steps) and pressed state. Safe if missing."""
@@ -328,6 +348,11 @@ class SeesawEncoderDriver:
                 self._last_error = f"Seesaw press read failed: {exc}"
                 self.close_unlocked()
                 return False
+
+    @property
+    def cached_press(self) -> bool:
+        with self._lock:
+            return bool(self._press)
 
     def _poll_blinka(self, *, consume_delta: bool = True) -> tuple[int, bool]:
         assert self._seesaw is not None

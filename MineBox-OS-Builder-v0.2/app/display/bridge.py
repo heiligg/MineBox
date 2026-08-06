@@ -231,7 +231,8 @@ class DisplayEventBridge:
             "diagnostics_mode": self._diagnostics_mode,
             "left_button": bool(getattr(hw, "read_left_button", lambda: False)()),
             "right_button": bool(getattr(hw, "read_right_button", lambda: False)()),
-            "encoder_press": bool(getattr(hw, "read_encoder_press", lambda: False)()),
+            # Use cached encoder press — never trigger a blocking I²C reconnect here.
+            "encoder_press": bool(getattr(hw, "cached_encoder_press", lambda: False)()),
             "snapshot": snap,
         }
 

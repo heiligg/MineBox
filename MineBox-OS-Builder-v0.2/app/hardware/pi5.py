@@ -163,6 +163,16 @@ class RaspberryPi5Hardware:
         except Exception:
             return bool(self._cached_press)
 
+    def cached_encoder_press(self) -> bool:
+        if self._encoder is not None:
+            try:
+                cached = getattr(self._encoder, "cached_press", None)
+                if cached is not None:
+                    return bool(cached)
+            except Exception:
+                pass
+        return bool(self._cached_press)
+
     def set_left_led(self, on: bool) -> FeatureStatus:
         _ = on
         status = self.config.left_led_status
@@ -301,7 +311,7 @@ class RaspberryPi5Hardware:
             "profile": self.profile_name,
             "left_button": self.read_left_button() if self._gpio_available else None,
             "right_button": self.read_right_button() if self._gpio_available else None,
-            "encoder_press": self.read_encoder_press() if self.encoder_available() else None,
+            "encoder_press": self.cached_encoder_press() if self.encoder_available() else None,
             "encoder_available": self.encoder_available(),
             "encoder": enc_snap,
             "encoder_status": self.capabilities().get("encoder"),
