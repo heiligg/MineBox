@@ -247,8 +247,22 @@
         body: JSON.stringify({ action, confirm: !!confirm }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.detail || "Action failed");
-      state.message = (data.result && data.result.message) || "Done.";
+      if (!res.ok) {
+        const detail = data.detail;
+        const msg =
+          typeof detail === "string"
+            ? detail
+            : Array.isArray(detail)
+              ? detail.map((d) => d.msg || JSON.stringify(d)).join("; ")
+              : detail && typeof detail === "object"
+                ? detail.message || JSON.stringify(detail)
+                : "Action failed";
+        throw new Error(msg);
+      }
+      state.message =
+        (data.result && data.result.message) ||
+        (data.result && data.result.backup && ("Backup created: " + data.result.backup)) ||
+        "Done.";
       state.progress = "";
       await refresh(true);
     } catch (err) {
@@ -326,6 +340,9 @@
   function render() {
     const app = document.getElementById("app");
     if (!app) return;
+    // Preserve scroll across re-renders so moving focus up/down adjusts the
+    // page by the same amount instead of jumping back to the top.
+    const savedScroll = app.scrollTop;
     app.innerHTML = "";
 
     if (!state.backendOk && state.screen !== "degraded") {
@@ -516,11 +533,20 @@
     screen.appendChild(footer);
     app.appendChild(screen);
 
-    // Scroll the whole page so the focused option stays visible (instant to
-    // avoid fighting the periodic snapshot re-render).
+    // Restore prior scroll, then nudge so the focused option stays in view.
+    // This keeps upward and downward encoder moves symmetric.
+    app.scrollTop = savedScroll;
     if (focusedRow) {
       requestAnimationFrame(() => {
-        focusedRow.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "auto" });
+        const appRect = app.getBoundingClientRect();
+        const rowRect = focusedRow.getBoundingClientRect();
+        const topPad = 56; // sticky topbar
+        const bottomPad = 12;
+        if (rowRect.bottom > appRect.bottom - bottomPad) {
+          app.scrollTop += rowRect.bottom - (appRect.bottom - bottomPad);
+        } else if (rowRect.top < appRect.top + topPad) {
+          app.scrollTop -= (appRect.top + topPad) - rowRect.top;
+        }
       });
     }
   }
