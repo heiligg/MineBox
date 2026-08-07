@@ -267,7 +267,9 @@
       return;
     }
     const map = state.actionMap || {};
-    const fallbackNav = map.scheme === "two_button_fallback" || !map.left_button_press;
+    // Rev D is default when the encoder is present. Only use two-button nav
+    // when the API explicitly says the encoder is missing.
+    const fallbackNav = map.scheme === "two_button_fallback";
     const table = {
       ENCODER_CW: map.encoder_cw || map.encoder_right || "next",
       ENCODER_CCW: map.encoder_ccw || map.encoder_left || "prev",
@@ -275,7 +277,7 @@
       ENCODER_LEFT: map.encoder_ccw || map.encoder_left || "prev",
       ENCODER_PRESS: map.encoder_press || "select",
       ENCODER_LONG_PRESS: map.encoder_long_press || "back",
-      // Default to two-button nav when the action map has not loaded yet.
+      // Defaults match hardware_rev_d (encoder primary; buttons are secondary).
       LEFT_BUTTON_PRESS: map.left_button_press || (fallbackNav ? "prev" : "back"),
       LEFT_BUTTON_HOLD: map.left_button_hold || (fallbackNav ? "back" : "home"),
       RIGHT_BUTTON_PRESS: map.right_button_press || (fallbackNav ? "next" : "context"),
@@ -490,23 +492,37 @@
     const menu = el("div", "menu");
     const items = currentItems();
     clampFocus();
+    let focusedRow = null;
     items.forEach((item, idx) => {
       const row = el("div", "item" + (idx === state.focus ? " focused" : ""));
       row.appendChild(el("span", "", item.label));
-      if (idx === state.focus) row.appendChild(el("span", "hint", "◀ focus"));
+      if (idx === state.focus) {
+        row.appendChild(el("span", "hint", "◀ focus"));
+        focusedRow = row;
+      }
       menu.appendChild(row);
     });
     screen.appendChild(menu);
 
     const footer = el("div", "footer");
     footer.appendChild(el("span", "", "Encoder: turn=move · press=select · hold=back"));
-    const buttonHint =
-      (state.actionMap && state.actionMap.scheme === "hardware_rev_d")
-        ? "Buttons: L short=back hold=home · R short=context hold=power"
-        : "Buttons: short L/R=move · hold L=back · hold R=select";
+    const revD =
+      !state.actionMap ||
+      state.actionMap.scheme !== "two_button_fallback";
+    const buttonHint = revD
+      ? "Buttons: L short=back hold=home · R short=context hold=power"
+      : "Buttons: short L/R=move · hold L=back · hold R=select";
     footer.appendChild(el("span", "", buttonHint));
     screen.appendChild(footer);
     app.appendChild(screen);
+
+    // Scroll the whole page so the focused option stays visible (instant to
+    // avoid fighting the periodic snapshot re-render).
+    if (focusedRow) {
+      requestAnimationFrame(() => {
+        focusedRow.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "auto" });
+      });
+    }
   }
 
   function diagRow(label, on) {
