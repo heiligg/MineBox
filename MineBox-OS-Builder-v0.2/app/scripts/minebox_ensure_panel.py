@@ -113,22 +113,109 @@ def ensure_config_hdmi() -> bool:
     return changed
 
 
+def ensure_xwrapper() -> bool:
+    """Allow the minebox service user to start X without a local login seat."""
+    path = Path("/etc/X11/Xwrapper.config")
+    desired = "allowed_users=anybody\nneeds_root_rights=yes\n"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        current = path.read_text(encoding="utf-8") if path.is_file() else ""
+    except OSError as exc:
+        print(f"warning: could not read {path}: {exc}", flush=True)
+        return False
+    if "allowed_users=anybody" in current and "needs_root_rights=yes" in current:
+        return False
+    try:
+        path.write_text(desired, encoding="utf-8")
+        os.chmod(path, 0o644)
+        print(f"Wrote {path} for non-console X kiosk.", flush=True)
+    except OSError as exc:
+        print(f"warning: could not write {path}: {exc}", flush=True)
+        return False
+    return True
+
+
+def ensure_vc4_xorg() -> bool:
+    path = Path("/etc/X11/xorg.conf.d/99-minebox-vc4.conf")
+    desired = (
+        'Section "OutputClass"\n'
+        '    Identifier "vc4"\n'
+        '    MatchDriver "vc4"\n'
+        '    Driver "modesetting"\n'
+        '    Option "PrimaryGPU" "true"\n'
+        "EndSection\n"
+    )
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        current = path.read_text(encoding="utf-8") if path.is_file() else ""
+    except OSError as exc:
+        print(f"warning: could not read {path}: {exc}", flush=True)
+        return False
+    if current == desired:
+        return False
+    try:
+        path.write_text(desired, encoding="utf-8")
+        print(f"Wrote {path}", flush=True)
+    except OSError as exc:
+        print(f"warning: could not write {path}: {exc}", flush=True)
+        return False
+    return True
+
+
+def ensure_kiosk_scripts_executable() -> None:
+    for rel in (
+        "/opt/minebox/scripts/minebox_display_session.sh",
+        "/opt/minebox/scripts/minebox_kiosk_launch.sh",
+    ):
+        path = Path(rel)
+        if path.is_file():
+            try:
+                os.chmod(path, 0o755)
+            except OSError as exc:
+                print(f"warning: chmod {path}: {exc}", flush=True)
+
+
 def ensure_display_unit() -> None:
     unit = Path("/etc/systemd/system/minebox-display.service")
-    if unit.is_file():
+    source = Path("/opt/minebox/services/minebox-display.service")
+    if source.is_file():
+        try:
+            _run(
+                [
+                    "install",
+                    "-m",
+                    "0644",
+                    str(source),
+                    str(unit),
+                ],
+                timeout=30,
+            )
+            _run(["systemctl", "daemon-reload"], timeout=60)
+        except Exception as exc:  # noqa: BLE001
+            print(f"warning: could not refresh display unit: {exc}", flush=True)
+    elif unit.is_file():
         text = unit.read_text(encoding="utf-8")
+        original = text
+        if "Conflicts=minebox-ui.service" not in text:
+            text = text.replace(
+                "Wants=minebox-api.service\n",
+                "Wants=minebox-api.service\nConflicts=minebox-ui.service\n",
+            )
         if "WantedBy=graphical.target" in text and "WantedBy=multi-user.target" not in text:
             text = text.replace(
                 "WantedBy=graphical.target",
                 "WantedBy=multi-user.target",
             )
+        if text != original:
             unit.write_text(text, encoding="utf-8")
-            print("minebox-display.service now WantedBy=multi-user.target", flush=True)
+            print("Updated minebox-display.service", flush=True)
             _run(["systemctl", "daemon-reload"], timeout=60)
 
+    ensure_kiosk_scripts_executable()
     _run(["systemctl", "reset-failed", "minebox-display.service"], timeout=30)
     _run(["systemctl", "enable", "minebox-display.service"], timeout=30)
-    # Best-effort start; missing chromium still fails honestly.
+    # Free the HDMI framebuffer from curses recovery UI.
+    _run(["systemctl", "stop", "minebox-ui.service"], timeout=60)
     result = _run(["systemctl", "restart", "minebox-display.service"], timeout=90)
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "").strip()
@@ -147,6 +234,8 @@ def main() -> int:
         reboot_hint = True
     if ensure_config_hdmi():
         reboot_hint = True
+    ensure_xwrapper()
+    ensure_vc4_xorg()
     ensure_display_unit()
     if reboot_hint:
         print(

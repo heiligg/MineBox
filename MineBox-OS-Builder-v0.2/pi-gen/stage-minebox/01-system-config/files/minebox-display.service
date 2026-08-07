@@ -3,6 +3,7 @@ Description=MineBox graphical local display (800x480 kiosk)
 Documentation=file:/opt/minebox/docs/v1/Display_Kiosk_Setup.md
 After=minebox-api.service
 Wants=minebox-api.service
+Conflicts=minebox-ui.service
 StartLimitIntervalSec=120
 StartLimitBurst=5
 
@@ -18,6 +19,7 @@ Environment=MINEBOX_KIOSK_PROFILE=/var/lib/minebox/chromium-kiosk
 Environment=DISPLAY=:0
 Environment=XAUTHORITY=/var/lib/minebox/.Xauthority
 ExecStartPre=/usr/bin/install -d -o minebox -g minebox -m 700 /var/lib/minebox/chromium-kiosk
+ExecStartPre=/usr/bin/chmod 0755 /opt/minebox/scripts/minebox_display_session.sh /opt/minebox/scripts/minebox_kiosk_launch.sh
 ExecStart=/usr/bin/xinit /opt/minebox/scripts/minebox_display_session.sh -- :0 vt7 -nolisten tcp
 Restart=on-failure
 RestartSec=5

@@ -42,6 +42,11 @@ If the kiosk fails: use tty1 curses (`minebox-ui.service`) or SSH/local console.
 OTA / `minebox-ensure-panel` sets:
 - `video=HDMI-A-1:800x480@60` in cmdline (landscape)
 - `hdmi_cvt=800 480 …` helpers in `config.txt`
-- `minebox-display.service` `WantedBy=multi-user.target` (not only `graphical.target`)
+- `/etc/X11/Xwrapper.config` `allowed_users=anybody` (service user may start X)
+- `/etc/X11/xorg.conf.d/99-minebox-vc4.conf` modesetting for vc4
+- `minebox-display.service` `WantedBy=multi-user.target` and `Conflicts=minebox-ui.service`
+
+The curses recovery UI and Chromium kiosk cannot share the same HDMI framebuffer.
+Starting the kiosk stops `minebox-ui`; if the kiosk fails, start `minebox-ui` again for recovery.
 
 Reboot once after the first panel config change. Kernel log spam on the text UI is reduced via `quiet loglevel=3`.
