@@ -103,7 +103,35 @@
 
   function system() {
     const f = foundation();
-    return f.system || f.system_health || {};
+    const raw = f.system || f.system_health || {};
+    const metrics = raw.metrics || {};
+    const thermal = raw.thermal && typeof raw.thermal === "object" ? raw.thermal : {};
+    return Object.assign({}, raw, metrics, {
+      temperature_c:
+        raw.temperature_c ??
+        thermal.temperature_c ??
+        metrics.temperature_c,
+      thermal_state:
+        raw.thermal_state ||
+        thermal.state ||
+        (typeof raw.thermal === "string" ? raw.thermal : "") ||
+        raw.value ||
+        "",
+      fan_state:
+        raw.fan_state ||
+        raw.fan ||
+        thermal.fan_state ||
+        thermal.fan_capability ||
+        raw.fan_capability ||
+        "",
+      fan_capability: raw.fan_capability || thermal.fan_capability || "",
+      cpu_percent: metrics.cpu_percent ?? raw.cpu_percent ?? raw.cpu,
+      memory_percent: metrics.memory_percent ?? raw.memory_percent ?? raw.memory,
+      disk_percent: metrics.disk_percent ?? raw.disk_percent ?? raw.disk,
+      uptime: metrics.uptime ?? raw.uptime,
+      hostname: metrics.hostname ?? raw.hostname,
+      ip_address: metrics.ip_address ?? raw.ip_address,
+    });
   }
 
   function serverActions() {
@@ -394,11 +422,12 @@
           ["Minecraft", m.value || m.state || m.status || "UNKNOWN", toneForState(m.value || m.state)],
           ["Players", m.players || m.player_count || "0", ""],
           ["CPU temp", formatTemp(s), toneForState(s.thermal_state)],
-          ["RAM", formatPct(s.memory_percent || s.memory), ""],
-          ["Storage", formatPct(s.disk_percent || s.disk), ""],
+          ["RAM", formatPct(s.memory_percent), ""],
+          ["Storage", formatPct(s.disk_percent), ""],
+          ["CPU load", formatPct(s.cpu_percent), ""],
           ["Network", netSummary(net), ""],
           ["Hotspot", net.hotspot_ssid || net.hotspot?.ssid || "—", ""],
-          ["Local IP", net.ip || net.local_ip || net.addresses?.[0] || "—", ""],
+          ["Local IP", net.ip || net.local_ip || net.addresses?.[0] || s.ip_address || "—", ""],
         ])
       );
     }
@@ -466,11 +495,11 @@
       screen.appendChild(
         renderStats([
           ["CPU temp", formatTemp(s), ""],
-          ["Thermal", s.thermal_state || s.thermal || "—", toneForState(s.thermal_state)],
+          ["Thermal", s.thermal_state || "—", toneForState(s.thermal_state)],
           ["Fan", s.fan_state || s.fan_capability || "NOT_CONFIGURED", ""],
-          ["CPU load", formatPct(s.cpu_percent || s.cpu), ""],
-          ["RAM", formatPct(s.memory_percent || s.memory), ""],
-          ["Disk", formatPct(s.disk_percent || s.disk), ""],
+          ["CPU load", formatPct(s.cpu_percent), ""],
+          ["RAM", formatPct(s.memory_percent), ""],
+          ["Disk", formatPct(s.disk_percent), ""],
           ["Uptime", s.uptime || "—", ""],
           ["Version", foundation().version || "—", ""],
           ["Profile", hw.profile || "—", ""],
