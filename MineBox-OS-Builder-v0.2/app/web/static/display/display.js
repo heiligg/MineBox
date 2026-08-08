@@ -22,6 +22,7 @@
     idleTimer: null,
     retryDelay: 1000,
     liveInputs: { left: false, right: false, enc: false, deltaHint: "" },
+    scrollNudge: 0, // +1 down / -1 up / "start" / "end"
   };
 
   const SCREENS = {
@@ -168,6 +169,7 @@
     state.screen = screen;
     state.focus = 0;
     state.message = "";
+    state.scrollNudge = "start";
     if (screen !== "confirm") {
       state.confirmAction = null;
       state.confirmLabel = "";
@@ -187,12 +189,20 @@
   }
 
   function intentNext() {
+    const n = currentItems().length;
+    const prev = state.focus;
     state.focus += 1;
     clampFocus();
+    state.scrollNudge =
+      state.wrap && n > 0 && prev === n - 1 && state.focus === 0 ? "start" : 1;
   }
   function intentPrev() {
+    const n = currentItems().length;
+    const prev = state.focus;
     state.focus -= 1;
     clampFocus();
+    state.scrollNudge =
+      state.wrap && n > 0 && prev === 0 && state.focus === n - 1 ? "end" : -1;
   }
   function intentBack() {
     if (state.screen === "confirm") {
@@ -359,10 +369,37 @@
 
   function toneForState(text) {
     const u = String(text || "").toUpperCase();
-    if (u.includes("RUNNING") || u.includes("OK") || u.includes("NORMAL")) return "ok";
-    if (u.includes("ERROR") || u.includes("CRASH") || u.includes("FAIL")) return "err";
-    if (u.includes("WARN") || u.includes("HOT") || u.includes("START")) return "warn";
+    if (u.includes("RUNNING") || u.includes("ONLINE") || u.includes("OK") || u.includes("NORMAL")) return "ok";
+    if (u.includes("ERROR") || u.includes("CRASH") || u.includes("FAIL") || u.includes("UNHEALTHY")) return "err";
+    if (u.includes("WARN") || u.includes("HOT") || u.includes("START") || u.includes("STOPPING")) return "warn";
     return "";
+  }
+
+  function mcLabel(m) {
+    const raw = String(m.value || m.state || m.status || "").toUpperCase();
+    if (!raw) return "UNKNOWN";
+    if (raw === "STOPPED" || raw === "NOT_INSTALLED" || raw === "UNAVAILABLE") return "OFFLINE";
+    if (raw.includes("RUNNING")) return "ONLINE";
+    return raw;
+  }
+
+  function mcPlayersLabel(m) {
+    const raw = String(m.value || m.state || m.status || "").toUpperCase();
+    if (raw === "STOPPED" || raw === "NOT_INSTALLED" || raw === "UNAVAILABLE" || raw === "STOPPING") {
+      return "—";
+    }
+    const p = m.players ?? m.player_count;
+    if (p == null || p === "" || String(p).toLowerCase() === "offline") return "0";
+    return String(p);
+  }
+
+  function mcHealthLabel(m) {
+    const raw = String(m.value || m.state || m.status || "").toUpperCase();
+    const health = m.health_check || m.health || {};
+    if (raw === "STOPPED" || raw === "NOT_INSTALLED" || raw === "UNAVAILABLE") return "offline";
+    if (health.healthy === true) return "OK";
+    if (health.healthy === false) return "UNHEALTHY";
+    return "—";
   }
 
   function render() {
@@ -419,8 +456,8 @@
       const net = (state.snapshot && state.snapshot.network) || {};
       screen.appendChild(
         renderStats([
-          ["Minecraft", m.value || m.state || m.status || "UNKNOWN", toneForState(m.value || m.state)],
-          ["Players", m.players || m.player_count || "0", ""],
+          ["Minecraft", mcLabel(m), toneForState(mcLabel(m))],
+          ["Players", mcPlayersLabel(m), ""],
           ["CPU temp", formatTemp(s), toneForState(s.thermal_state)],
           ["RAM", formatPct(s.memory_percent), ""],
           ["Storage", formatPct(s.disk_percent), ""],
@@ -434,23 +471,22 @@
 
     if (state.screen === "server" || state.screen === "server_details") {
       const m = mc();
-      const health = m.health_check || m.health || {};
       screen.appendChild(
         renderStats([
           ["Name", m.server_name || m.name || "Minecraft", ""],
           ["Provider", m.loader || m.provider || "—", ""],
           ["Version", m.version || "—", ""],
-          ["State", m.value || m.state || "—", toneForState(m.value || m.state)],
+          ["State", mcLabel(m), toneForState(mcLabel(m))],
           ["Uptime", m.uptime || "—", ""],
-          ["Players", m.players || "0", ""],
+          ["Players", mcPlayersLabel(m), ""],
           ["Operation", (foundation().operations && foundation().operations.current) || "idle", ""],
-          ["Last error", m.last_error || health.message || "none", m.last_error ? "err" : ""],
+          ["Last error", m.last_error || "none", m.last_error ? "err" : ""],
         ])
       );
       if (state.screen === "server_details") {
         screen.appendChild(
           renderStats([
-            ["Health", health.healthy === true ? "OK" : health.healthy === false ? "UNHEALTHY" : "—", ""],
+            ["Health", mcHealthLabel(m), toneForState(mcHealthLabel(m))],
             ["Support", m.support_level || "see providers", ""],
             ["Crash summary", (foundation().crash && foundation().crash.summary) || "none", ""],
             ["Secrets", "redacted", ""],
@@ -562,11 +598,23 @@
     screen.appendChild(footer);
     app.appendChild(screen);
 
-    // Restore prior scroll, then nudge so the focused option stays in view.
-    // This keeps upward and downward encoder moves symmetric.
-    app.scrollTop = savedScroll;
+    // Keep page scroll in sync with encoder moves (same distance up and down).
+    const nudge = state.scrollNudge;
+    state.scrollNudge = 0;
+    if (nudge === "start") {
+      app.scrollTop = 0;
+    } else if (nudge === "end") {
+      app.scrollTop = app.scrollHeight;
+    } else {
+      app.scrollTop = savedScroll;
+    }
     if (focusedRow) {
       requestAnimationFrame(() => {
+        const gap = 6;
+        const step = focusedRow.offsetHeight + gap;
+        if (nudge === 1 || nudge === -1) {
+          app.scrollTop = Math.max(0, savedScroll + nudge * step);
+        }
         const appRect = app.getBoundingClientRect();
         const rowRect = focusedRow.getBoundingClientRect();
         const topPad = 56; // sticky topbar
@@ -576,6 +624,7 @@
         } else if (rowRect.top < appRect.top + topPad) {
           app.scrollTop -= (appRect.top + topPad) - rowRect.top;
         }
+        if (app.scrollTop < 0) app.scrollTop = 0;
       });
     }
   }
