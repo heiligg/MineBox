@@ -1,0 +1,68 @@
+﻿============================================================
+echo minebox | sudo -S -p '' gpioinfo gpiochip0 2>/dev/null | sed -n '1,30p; /line *17:/p; /line *18
+
+============================================================
+grep -RInE 'dtoverlay|gpio|waveshare|hdmi' /boot/firmware/config.txt /boot/config.txt 2>/dev/null | 
+/boot/firmware/config.txt:26:dtoverlay=vc4-kms-v3d
+/boot/firmware/config.txt:49:dtoverlay=dwc2,dr_mode=host
+/boot/firmware/config.txt:52:dtoverlay=nospi10
+
+============================================================
+echo minebox | sudo -S -p '' pinctrl get 17 23 24 22 27 5 6 16 26 13 12 2>/dev/null || true
+Too many arguments
+
+============================================================
+ls /proc/device-tree/soc/*/gpio* 2>/dev/null | head; cat /sys/kernel/debug/gpio 2>/dev/null | head -
+gpiochip11: 17 GPIOs, parent: platform/107d517c00.gpio, gpio-brcmstb@107d517c00:
+ gpio-0   (RP1_SDA             )
+ gpio-1   (RP1_SCL             )
+ gpio-2   (RP1_RUN             |RP1 RUN pin         ) out hi 
+ gpio-3   (SD_IOVDD_SEL        |vdd-sd-io           ) out hi 
+
+============================================================
+python3 - <<'PY'
+import time,json,urllib.request
+print('Hold a button for 3s if you can...')
+for i i
+Hold a button for 3s if you can...
+0 live False False avail True
+1 live False False avail True
+2 live False False avail True
+3 live False False avail True
+4 live False False avail True
+5 live False False avail True
+6 live False False avail True
+7 live False False avail True
+8 live False False avail True
+9 live False False avail True
+10 live False False avail True
+11 live False False avail True
+12 live False False avail True
+13 live False False avail True
+14 live False False avail True
+15 live False False avail True
+16 live False False avail True
+17 live False False avail True
+18 live False False avail True
+19 live False False avail True
+20 live False False avail True
+21 live False False avail True
+22 live False False avail True
+23 live False False avail True
+24 live False False avail True
+25 live False False avail True
+26 live False False avail True
+27 live False False avail True
+28 live False False avail True
+29 live False False avail True
+30 live False False avail True
+31 live False False avail True
+32 live False False avail True
+33 live False False avail True
+34 live False False avail True
+35 live False False avail True
+36 live False False avail True
+37 live False False avail True
+38 live False False avail True
+39 live False False avail True
+
