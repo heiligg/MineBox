@@ -127,5 +127,52 @@ class BackupTests(unittest.TestCase):
         self.assertTrue(removed or len(backups._backup_files()) >= 1)
 
 
+class PerServerBackupTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        self.world = self.root / "world"
+        self.world.mkdir()
+        os.environ["MINEBOX_RUNTIME_DIR"] = str(self.root / "runtime")
+        Path(os.environ["MINEBOX_RUNTIME_DIR"]).mkdir(parents=True, exist_ok=True)
+        self.patches = [
+            mock.patch.object(backups, "_minecraft_dir", return_value=self.root),
+            mock.patch.object(backups, "_world_dir", return_value=self.world),
+        ]
+        for patch in self.patches:
+            patch.start()
+
+    def tearDown(self) -> None:
+        for patch in self.patches:
+            patch.stop()
+        self.tmp.cleanup()
+
+    def test_lists_only_active_server_backups(self) -> None:
+        alpha = self.root / "backups" / "alpha"
+        beta = self.root / "backups" / "beta"
+        alpha.mkdir(parents=True)
+        beta.mkdir(parents=True)
+        (alpha / "world-alpha-1.tar.gz").write_bytes(b"a")
+        (beta / "world-beta-1.tar.gz").write_bytes(b"b")
+        active = mock.Mock(server_id="alpha", name="Alpha")
+        with mock.patch.object(backups.servers, "active_server", return_value=active):
+            names = [path.name for path in backups._backup_files()]
+        self.assertEqual(names, ["world-alpha-1.tar.gz"])
+
+    def test_migrates_legacy_shared_backups(self) -> None:
+        shared = self.root / "backups"
+        shared.mkdir()
+        legacy = shared / "world-alpha-old.tar.gz"
+        legacy.write_bytes(b"old")
+        other = shared / "world-beta-old.tar.gz"
+        other.write_bytes(b"other")
+        active = mock.Mock(server_id="alpha", name="Alpha")
+        with mock.patch.object(backups.servers, "active_server", return_value=active):
+            names = [path.name for path in backups._backup_files()]
+        self.assertEqual(names, ["world-alpha-old.tar.gz"])
+        self.assertTrue((shared / "alpha" / "world-alpha-old.tar.gz").is_file())
+        self.assertTrue(other.is_file())
+
+
 if __name__ == "__main__":
     unittest.main()

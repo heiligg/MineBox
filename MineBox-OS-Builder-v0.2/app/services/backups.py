@@ -22,8 +22,59 @@ def _minecraft_dir() -> Path:
     return servers.MINECRAFT_ROOT
 
 
-def _backup_dir() -> Path:
+def _shared_backup_dir() -> Path:
     return _minecraft_dir() / "backups"
+
+
+def _server_backup_key(server_id: str | None = None) -> str:
+    raw = (server_id or "").strip()
+    if not raw:
+        active = servers.active_server()
+        raw = active.server_id if active is not None else "default"
+    key = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in raw)[:32]
+    return key or "default"
+
+
+def _backup_dir() -> Path:
+    return _shared_backup_dir() / _server_backup_key()
+
+
+def _migrate_legacy_backups(dest: Path) -> None:
+    """Move this server's old shared-root archives into its private folder."""
+    try:
+        dest_resolved = dest.resolve()
+        shared = _shared_backup_dir().resolve()
+    except OSError:
+        return
+    if not shared.is_dir() or dest_resolved == shared:
+        return
+    prefix = f"{BACKUP_PREFIX}{dest_resolved.name}-"
+    try:
+        dest_resolved.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        return
+    try:
+        children = list(shared.iterdir())
+    except OSError:
+        return
+    for path in children:
+        if not path.is_file():
+            continue
+        if not (path.name.startswith(prefix) and path.name.endswith(BACKUP_SUFFIX)):
+            continue
+        target = dest_resolved / path.name
+        try:
+            if not target.exists():
+                path.replace(target)
+            sidecar = Path(str(path) + ".sha256")
+            if sidecar.is_file():
+                side_target = dest_resolved / sidecar.name
+                if not side_target.exists():
+                    sidecar.replace(side_target)
+                else:
+                    sidecar.unlink(missing_ok=True)
+        except OSError:
+            continue
 
 
 def _world_dir() -> Path:
@@ -106,6 +157,7 @@ def _backup_info(path: Path) -> dict[str, Any]:
 
 def _backup_files() -> list[Path]:
     backup_directory = _backup_dir()
+    _migrate_legacy_backups(backup_directory)
     if not backup_directory.exists():
         return []
 
@@ -146,10 +198,13 @@ def backup_status() -> dict[str, Any]:
     next_due = None
     if interval_hours > 0:
         next_due = last_auto + (interval_hours * 3600) if last_auto else None
+    active = servers.active_server()
 
     return {
         "backup_directory": str(_backup_dir()),
         "world_directory": str(_world_dir()),
+        "server_id": active.server_id if active is not None else None,
+        "server_name": active.name if active is not None else None,
         "backup_count": len(backups),
         "busy": _backup_lock.locked(),
         "retention": retention,
@@ -915,12 +970,7 @@ def create_backup(
             version = ""
 
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        filename = f"{BACKUP_PREFIX}{server_id}-{timestamp}{BACKUP_SUFFIX}"
-        # Keep legacy prefix pattern for get_backup_path validation.
-        if not filename.startswith(BACKUP_PREFIX):
-            filename = f"{BACKUP_PREFIX}{timestamp}{BACKUP_SUFFIX}"
-        # get_backup_path requires world- prefix and .tar.gz — server_id may have chars.
-        safe_id = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in server_id)[:32]
+        safe_id = _server_backup_key(server_id)
         filename = f"{BACKUP_PREFIX}{safe_id}-{timestamp}{BACKUP_SUFFIX}"
 
         final_path = _backup_dir() / filename

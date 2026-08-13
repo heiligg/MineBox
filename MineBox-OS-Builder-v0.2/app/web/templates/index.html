@@ -2837,6 +2837,7 @@
                         : "Create Backup";
             }
 
+            const serverLabel = data.server_name || data.server_id || "this server";
             backupCountValue.textContent =
                 String(data.backup_count ?? backups.length);
 
@@ -2900,7 +2901,7 @@
                 Number(data.retention) || 10;
 
             backupRefreshNote.textContent =
-                `${backups.length} of ${retention} retained`;
+                `${backups.length} of ${retention} retained · ${serverLabel}`;
 
             backupList.replaceChildren();
 
@@ -2910,7 +2911,7 @@
 
                 empty.className = "backup-empty";
                 empty.textContent =
-                    "No backups have been created yet.";
+                    `No backups yet for ${serverLabel}.`;
 
                 backupList.appendChild(empty);
                 return;

@@ -548,6 +548,7 @@
       const latest = b.latest || {};
       screen.appendChild(
         renderStats([
+          ["Server", b.server_name || "Active server", ""],
           ["Latest", latest.filename || "none", ""],
           ["Count", String(b.count ?? 0), ""],
           ["Total size", formatBytes(b.total_size), ""],

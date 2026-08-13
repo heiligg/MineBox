@@ -169,6 +169,7 @@ def snapshot(request: Request) -> dict[str, Any]:
             "count": status.get("backup_count", len(items)),
             "total_size": total_size,
             "busy": status.get("busy"),
+            "server_name": status.get("server_name"),
             "latest": {
                 "filename": (latest or {}).get("filename"),
                 "size": (latest or {}).get("size_bytes")
