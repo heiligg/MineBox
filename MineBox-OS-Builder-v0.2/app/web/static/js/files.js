@@ -10,6 +10,7 @@
     let quickLinks;
     let listing;
     let uploadInput;
+    let folderInput;
     let mkdirInput;
     let busy = false;
     let currentPath = "";
@@ -163,6 +164,20 @@
                 color: #ffd27a;
             }
             .files-hidden-input { display: none; }
+            .files-drop {
+                margin-top: 14px;
+                padding: 16px;
+                border: 1px dashed rgba(255,255,255,0.18);
+                border-radius: 12px;
+                color: var(--muted);
+                font-size: 13px;
+                text-align: center;
+            }
+            .files-drop.active {
+                border-color: rgba(47, 111, 237, 0.8);
+                background: rgba(47, 111, 237, 0.12);
+                color: var(--text);
+            }
         `;
         document.head.appendChild(style);
     }
@@ -431,34 +446,91 @@
         }
     }
 
-    async function uploadSelected() {
-        const file = uploadInput.files && uploadInput.files[0];
-        if (!file) {
+    function relativeFor(file) {
+        const nested = String(file.webkitRelativePath || file.relativePath || "").replace(/\\/g, "/");
+        if (nested && !nested.endsWith("/")) {
+            return nested;
+        }
+        return file.name || "";
+    }
+
+    function collectFiles(fileList) {
+        return [...(fileList || [])].filter((file) => {
+            const name = relativeFor(file);
+            return file && file.size >= 0 && name && !name.endsWith("/");
+        });
+    }
+
+    async function uploadFiles(fileList) {
+        const files = collectFiles(fileList);
+        if (!files.length) {
             return;
         }
-        const form = new FormData();
-        form.append("path", currentPath || "");
-        form.append("file", file, file.name);
+        if (busy) {
+            showMessage("Wait for the current file operation to finish.", "warning");
+            return;
+        }
         busy = true;
-        showMessage(`Uploading ${file.name}…`);
+        let lastPayload = null;
+        let uploaded = 0;
         try {
-            const response = await fetch(`${API_BASE}/upload`, {
-                method: "POST",
-                credentials: "same-origin",
-                body: form,
-            });
-            const payload = await response.json().catch(() => ({}));
-            if (!response.ok) {
-                throw new Error(detailFromPayload(payload));
+            for (const file of files) {
+                const relative = relativeFor(file);
+                showMessage(`Uploading ${uploaded + 1}/${files.length}: ${relative}`);
+                const form = new FormData();
+                form.append("path", currentPath || "");
+                form.append("relative_path", relative);
+                form.append("file", file, file.name);
+                const response = await fetch(`${API_BASE}/upload`, {
+                    method: "POST",
+                    credentials: "same-origin",
+                    body: form,
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) {
+                    throw new Error(detailFromPayload(payload) || `Failed: ${relative}`);
+                }
+                lastPayload = payload;
+                uploaded += 1;
             }
-            showMessage(`Uploaded ${file.name}`, "success");
-            renderListing(payload);
+            showMessage(
+                uploaded === 1
+                    ? `Uploaded ${relativeFor(files[0])}`
+                    : `Uploaded ${uploaded} files`,
+                "success"
+            );
+            if (lastPayload) {
+                renderListing(lastPayload);
+            } else {
+                await loadPath(currentPath);
+            }
         } catch (error) {
-            showMessage(error.message || "Upload failed.", "error");
+            showMessage(
+                uploaded
+                    ? `${error.message || "Upload failed."} (${uploaded}/${files.length} finished)`
+                    : (error.message || "Upload failed."),
+                "error"
+            );
+            if (lastPayload) {
+                renderListing(lastPayload);
+            }
         } finally {
-            uploadInput.value = "";
+            if (uploadInput) {
+                uploadInput.value = "";
+            }
+            if (folderInput) {
+                folderInput.value = "";
+            }
             busy = false;
         }
+    }
+
+    async function uploadSelected() {
+        await uploadFiles(uploadInput.files);
+    }
+
+    async function uploadFolderSelected() {
+        await uploadFiles(folderInput.files);
     }
 
     async function deleteEntry(entry) {
@@ -522,12 +594,26 @@
         const uploadBtn = document.createElement("button");
         uploadBtn.type = "button";
         uploadBtn.className = "files-button primary";
-        uploadBtn.textContent = "Upload file";
+        uploadBtn.textContent = "Upload files";
         uploadInput = document.createElement("input");
         uploadInput.type = "file";
+        uploadInput.multiple = true;
         uploadInput.className = "files-hidden-input";
         uploadBtn.addEventListener("click", () => uploadInput.click());
         uploadInput.addEventListener("change", uploadSelected);
+
+        const folderBtn = document.createElement("button");
+        folderBtn.type = "button";
+        folderBtn.className = "files-button";
+        folderBtn.textContent = "Upload folder";
+        folderInput = document.createElement("input");
+        folderInput.type = "file";
+        folderInput.multiple = true;
+        folderInput.className = "files-hidden-input";
+        folderInput.setAttribute("webkitdirectory", "");
+        folderInput.setAttribute("directory", "");
+        folderBtn.addEventListener("click", () => folderInput.click());
+        folderInput.addEventListener("change", uploadFolderSelected);
 
         mkdirInput = document.createElement("input");
         mkdirInput.type = "text";
@@ -546,13 +632,42 @@
         refreshBtn.textContent = "Refresh";
         refreshBtn.addEventListener("click", () => loadPath(currentPath));
 
-        toolbar.append(uploadBtn, uploadInput, mkdirInput, mkdirBtn, refreshBtn);
+        toolbar.append(
+            uploadBtn,
+            uploadInput,
+            folderBtn,
+            folderInput,
+            mkdirInput,
+            mkdirBtn,
+            refreshBtn
+        );
 
         listing = document.createElement("div");
+        const drop = document.createElement("div");
+        drop.className = "files-drop";
+        drop.textContent = "Drop files or folders here to upload into this directory.";
+        ["dragenter", "dragover"].forEach((eventName) => {
+            drop.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                drop.classList.add("active");
+            });
+        });
+        ["dragleave", "drop"].forEach((eventName) => {
+            drop.addEventListener(eventName, (event) => {
+                event.preventDefault();
+                drop.classList.remove("active");
+            });
+        });
+        drop.addEventListener("drop", (event) => {
+            const files = event.dataTransfer && event.dataTransfer.files;
+            if (files && files.length) {
+                uploadFiles(files);
+            }
+        });
         message = document.createElement("div");
         message.className = "files-message";
 
-        panel.append(header, quickLinks, breadcrumb, toolbar, listing, message);
+        panel.append(header, quickLinks, breadcrumb, toolbar, drop, listing, message);
         target.parentNode.insertBefore(panel, target);
         return true;
     }

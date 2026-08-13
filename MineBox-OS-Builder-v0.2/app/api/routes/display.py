@@ -162,7 +162,7 @@ def snapshot(request: Request) -> dict[str, Any]:
 
         status = backup_service.backup_status()
         items = status.get("backups") or []
-        total_size = sum(int(i.get("size") or 0) for i in items)
+        total_size = sum(int(i.get("size_bytes") or 0) for i in items)
         latest = items[0] if items else None
         backups = {
             "count": status.get("backup_count", len(items)),
@@ -170,7 +170,8 @@ def snapshot(request: Request) -> dict[str, Any]:
             "busy": status.get("busy"),
             "latest": {
                 "filename": (latest or {}).get("filename"),
-                "size": (latest or {}).get("size"),
+                "size": (latest or {}).get("size_bytes")
+                or (latest or {}).get("size"),
                 "created_at": (latest or {}).get("created_at"),
             }
             if latest
@@ -268,7 +269,11 @@ def display_action(request: Request, body: DisplayActionRequest) -> dict[str, An
         raise
     except Exception as exc:  # noqa: BLE001
         LOGGER.warning("display action %s failed: %s", action, exc)
-        raise HTTPException(status_code=500, detail="Display action failed.") from exc
+        detail = str(exc).strip() or "Display action failed."
+        # Prefer concrete backup/lifecycle errors over a generic 500.
+        if "Backup" in type(exc).__name__ or action.startswith("backup_"):
+            raise HTTPException(status_code=400, detail=detail) from exc
+        raise HTTPException(status_code=500, detail=detail) from exc
 
     return {"ok": True, "action": action, "result": result}
 
@@ -311,11 +316,13 @@ def _execute_display_action(action: str) -> dict[str, Any]:
 
         created = backups.create_backup()
         if isinstance(created, dict):
+            name = created.get("filename") or created.get("path") or created
             return {
                 "ok": True,
-                "backup": created.get("filename") or created.get("path") or created,
+                "backup": name,
+                "message": f"Backup created: {name}",
             }
-        return {"ok": True, "backup": str(created)}
+        return {"ok": True, "backup": str(created), "message": f"Backup created: {created}"}
     if action == "services_restart":
         import subprocess
 

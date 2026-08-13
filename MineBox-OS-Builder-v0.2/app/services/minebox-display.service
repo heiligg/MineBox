@@ -22,7 +22,8 @@ Environment=XAUTHORITY=/var/lib/minebox/.Xauthority
 ExecStartPre=/usr/bin/install -d -o minebox -g minebox -m 700 /var/lib/minebox/chromium-kiosk
 ExecStartPre=/usr/bin/chmod 0755 /opt/minebox/scripts/minebox_display_session.sh /opt/minebox/scripts/minebox_kiosk_launch.sh
 # Requires /etc/X11/Xwrapper.config allowed_users=anybody (minebox-ensure-panel).
-ExecStart=/usr/bin/xinit /opt/minebox/scripts/minebox_display_session.sh -- :0 vt7 -nolisten tcp
+# Invoke via bash so a broken shebang (e.g. CRLF from Windows deploy) cannot fall back to dash.
+ExecStart=/usr/bin/xinit /bin/bash /opt/minebox/scripts/minebox_display_session.sh -- :0 vt7 -nolisten tcp
 Restart=on-failure
 RestartSec=5
 TimeoutStartSec=90

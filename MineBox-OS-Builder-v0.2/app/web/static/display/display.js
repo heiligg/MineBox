@@ -22,6 +22,7 @@
     idleTimer: null,
     retryDelay: 1000,
     liveInputs: { left: false, right: false, enc: false, deltaHint: "" },
+    scrollNudge: 0, // +1 down / -1 up / "start" / "end"
   };
 
   const SCREENS = {
@@ -103,7 +104,35 @@
 
   function system() {
     const f = foundation();
-    return f.system || f.system_health || {};
+    const raw = f.system || f.system_health || {};
+    const metrics = raw.metrics || {};
+    const thermal = raw.thermal && typeof raw.thermal === "object" ? raw.thermal : {};
+    return Object.assign({}, raw, metrics, {
+      temperature_c:
+        raw.temperature_c ??
+        thermal.temperature_c ??
+        metrics.temperature_c,
+      thermal_state:
+        raw.thermal_state ||
+        thermal.state ||
+        (typeof raw.thermal === "string" ? raw.thermal : "") ||
+        raw.value ||
+        "",
+      fan_state:
+        raw.fan_state ||
+        raw.fan ||
+        thermal.fan_state ||
+        thermal.fan_capability ||
+        raw.fan_capability ||
+        "",
+      fan_capability: raw.fan_capability || thermal.fan_capability || "",
+      cpu_percent: metrics.cpu_percent ?? raw.cpu_percent ?? raw.cpu,
+      memory_percent: metrics.memory_percent ?? raw.memory_percent ?? raw.memory,
+      disk_percent: metrics.disk_percent ?? raw.disk_percent ?? raw.disk,
+      uptime: metrics.uptime ?? raw.uptime,
+      hostname: metrics.hostname ?? raw.hostname,
+      ip_address: metrics.ip_address ?? raw.ip_address,
+    });
   }
 
   function serverActions() {
@@ -140,6 +169,7 @@
     state.screen = screen;
     state.focus = 0;
     state.message = "";
+    state.scrollNudge = "start";
     if (screen !== "confirm") {
       state.confirmAction = null;
       state.confirmLabel = "";
@@ -159,12 +189,20 @@
   }
 
   function intentNext() {
+    const n = currentItems().length;
+    const prev = state.focus;
     state.focus += 1;
     clampFocus();
+    state.scrollNudge =
+      state.wrap && n > 0 && prev === n - 1 && state.focus === 0 ? "start" : 1;
   }
   function intentPrev() {
+    const n = currentItems().length;
+    const prev = state.focus;
     state.focus -= 1;
     clampFocus();
+    state.scrollNudge =
+      state.wrap && n > 0 && prev === 0 && state.focus === n - 1 ? "end" : -1;
   }
   function intentBack() {
     if (state.screen === "confirm") {
@@ -247,8 +285,22 @@
         body: JSON.stringify({ action, confirm: !!confirm }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.detail || "Action failed");
-      state.message = (data.result && data.result.message) || "Done.";
+      if (!res.ok) {
+        const detail = data.detail;
+        const msg =
+          typeof detail === "string"
+            ? detail
+            : Array.isArray(detail)
+              ? detail.map((d) => d.msg || JSON.stringify(d)).join("; ")
+              : detail && typeof detail === "object"
+                ? detail.message || JSON.stringify(detail)
+                : "Action failed";
+        throw new Error(msg);
+      }
+      state.message =
+        (data.result && data.result.message) ||
+        (data.result && data.result.backup && ("Backup created: " + data.result.backup)) ||
+        "Done.";
       state.progress = "";
       await refresh(true);
     } catch (err) {
@@ -267,7 +319,9 @@
       return;
     }
     const map = state.actionMap || {};
-    const fallbackNav = map.scheme === "two_button_fallback" || !map.left_button_press;
+    // Rev D is default when the encoder is present. Only use two-button nav
+    // when the API explicitly says the encoder is missing.
+    const fallbackNav = map.scheme === "two_button_fallback";
     const table = {
       ENCODER_CW: map.encoder_cw || map.encoder_right || "next",
       ENCODER_CCW: map.encoder_ccw || map.encoder_left || "prev",
@@ -275,7 +329,7 @@
       ENCODER_LEFT: map.encoder_ccw || map.encoder_left || "prev",
       ENCODER_PRESS: map.encoder_press || "select",
       ENCODER_LONG_PRESS: map.encoder_long_press || "back",
-      // Default to two-button nav when the action map has not loaded yet.
+      // Defaults match hardware_rev_d (encoder primary; buttons are secondary).
       LEFT_BUTTON_PRESS: map.left_button_press || (fallbackNav ? "prev" : "back"),
       LEFT_BUTTON_HOLD: map.left_button_hold || (fallbackNav ? "back" : "home"),
       RIGHT_BUTTON_PRESS: map.right_button_press || (fallbackNav ? "next" : "context"),
@@ -315,15 +369,45 @@
 
   function toneForState(text) {
     const u = String(text || "").toUpperCase();
-    if (u.includes("RUNNING") || u.includes("OK") || u.includes("NORMAL")) return "ok";
-    if (u.includes("ERROR") || u.includes("CRASH") || u.includes("FAIL")) return "err";
-    if (u.includes("WARN") || u.includes("HOT") || u.includes("START")) return "warn";
+    if (u.includes("RUNNING") || u.includes("ONLINE") || u.includes("OK") || u.includes("NORMAL")) return "ok";
+    if (u.includes("ERROR") || u.includes("CRASH") || u.includes("FAIL") || u.includes("UNHEALTHY")) return "err";
+    if (u.includes("WARN") || u.includes("HOT") || u.includes("START") || u.includes("STOPPING")) return "warn";
     return "";
+  }
+
+  function mcLabel(m) {
+    const raw = String(m.value || m.state || m.status || "").toUpperCase();
+    if (!raw) return "UNKNOWN";
+    if (raw === "STOPPED" || raw === "NOT_INSTALLED" || raw === "UNAVAILABLE") return "OFFLINE";
+    if (raw.includes("RUNNING")) return "ONLINE";
+    return raw;
+  }
+
+  function mcPlayersLabel(m) {
+    const raw = String(m.value || m.state || m.status || "").toUpperCase();
+    if (raw === "STOPPED" || raw === "NOT_INSTALLED" || raw === "UNAVAILABLE" || raw === "STOPPING") {
+      return "—";
+    }
+    const p = m.players ?? m.player_count;
+    if (p == null || p === "" || String(p).toLowerCase() === "offline") return "0";
+    return String(p);
+  }
+
+  function mcHealthLabel(m) {
+    const raw = String(m.value || m.state || m.status || "").toUpperCase();
+    const health = m.health_check || m.health || {};
+    if (raw === "STOPPED" || raw === "NOT_INSTALLED" || raw === "UNAVAILABLE") return "offline";
+    if (health.healthy === true) return "OK";
+    if (health.healthy === false) return "UNHEALTHY";
+    return "—";
   }
 
   function render() {
     const app = document.getElementById("app");
     if (!app) return;
+    // Preserve scroll across re-renders so moving focus up/down adjusts the
+    // page by the same amount instead of jumping back to the top.
+    const savedScroll = app.scrollTop;
     app.innerHTML = "";
 
     if (!state.backendOk && state.screen !== "degraded") {
@@ -372,37 +456,37 @@
       const net = (state.snapshot && state.snapshot.network) || {};
       screen.appendChild(
         renderStats([
-          ["Minecraft", m.value || m.state || m.status || "UNKNOWN", toneForState(m.value || m.state)],
-          ["Players", m.players || m.player_count || "0", ""],
+          ["Minecraft", mcLabel(m), toneForState(mcLabel(m))],
+          ["Players", mcPlayersLabel(m), ""],
           ["CPU temp", formatTemp(s), toneForState(s.thermal_state)],
-          ["RAM", formatPct(s.memory_percent || s.memory), ""],
-          ["Storage", formatPct(s.disk_percent || s.disk), ""],
+          ["RAM", formatPct(s.memory_percent), ""],
+          ["Storage", formatPct(s.disk_percent), ""],
+          ["CPU load", formatPct(s.cpu_percent), ""],
           ["Network", netSummary(net), ""],
           ["Hotspot", net.hotspot_ssid || net.hotspot?.ssid || "—", ""],
-          ["Local IP", net.ip || net.local_ip || net.addresses?.[0] || "—", ""],
+          ["Local IP", net.ip || net.local_ip || net.addresses?.[0] || s.ip_address || "—", ""],
         ])
       );
     }
 
     if (state.screen === "server" || state.screen === "server_details") {
       const m = mc();
-      const health = m.health_check || m.health || {};
       screen.appendChild(
         renderStats([
           ["Name", m.server_name || m.name || "Minecraft", ""],
           ["Provider", m.loader || m.provider || "—", ""],
           ["Version", m.version || "—", ""],
-          ["State", m.value || m.state || "—", toneForState(m.value || m.state)],
+          ["State", mcLabel(m), toneForState(mcLabel(m))],
           ["Uptime", m.uptime || "—", ""],
-          ["Players", m.players || "0", ""],
+          ["Players", mcPlayersLabel(m), ""],
           ["Operation", (foundation().operations && foundation().operations.current) || "idle", ""],
-          ["Last error", m.last_error || health.message || "none", m.last_error ? "err" : ""],
+          ["Last error", m.last_error || "none", m.last_error ? "err" : ""],
         ])
       );
       if (state.screen === "server_details") {
         screen.appendChild(
           renderStats([
-            ["Health", health.healthy === true ? "OK" : health.healthy === false ? "UNHEALTHY" : "—", ""],
+            ["Health", mcHealthLabel(m), toneForState(mcHealthLabel(m))],
             ["Support", m.support_level || "see providers", ""],
             ["Crash summary", (foundation().crash && foundation().crash.summary) || "none", ""],
             ["Secrets", "redacted", ""],
@@ -447,11 +531,11 @@
       screen.appendChild(
         renderStats([
           ["CPU temp", formatTemp(s), ""],
-          ["Thermal", s.thermal_state || s.thermal || "—", toneForState(s.thermal_state)],
+          ["Thermal", s.thermal_state || "—", toneForState(s.thermal_state)],
           ["Fan", s.fan_state || s.fan_capability || "NOT_CONFIGURED", ""],
-          ["CPU load", formatPct(s.cpu_percent || s.cpu), ""],
-          ["RAM", formatPct(s.memory_percent || s.memory), ""],
-          ["Disk", formatPct(s.disk_percent || s.disk), ""],
+          ["CPU load", formatPct(s.cpu_percent), ""],
+          ["RAM", formatPct(s.memory_percent), ""],
+          ["Disk", formatPct(s.disk_percent), ""],
           ["Uptime", s.uptime || "—", ""],
           ["Version", foundation().version || "—", ""],
           ["Profile", hw.profile || "—", ""],
@@ -490,23 +574,59 @@
     const menu = el("div", "menu");
     const items = currentItems();
     clampFocus();
+    let focusedRow = null;
     items.forEach((item, idx) => {
       const row = el("div", "item" + (idx === state.focus ? " focused" : ""));
       row.appendChild(el("span", "", item.label));
-      if (idx === state.focus) row.appendChild(el("span", "hint", "◀ focus"));
+      if (idx === state.focus) {
+        row.appendChild(el("span", "hint", "◀ focus"));
+        focusedRow = row;
+      }
       menu.appendChild(row);
     });
     screen.appendChild(menu);
 
     const footer = el("div", "footer");
     footer.appendChild(el("span", "", "Encoder: turn=move · press=select · hold=back"));
-    const buttonHint =
-      (state.actionMap && state.actionMap.scheme === "hardware_rev_d")
-        ? "Buttons: L short=back hold=home · R short=context hold=power"
-        : "Buttons: short L/R=move · hold L=back · hold R=select";
+    const revD =
+      !state.actionMap ||
+      state.actionMap.scheme !== "two_button_fallback";
+    const buttonHint = revD
+      ? "Buttons: L short=back hold=home · R short=context hold=power"
+      : "Buttons: short L/R=move · hold L=back · hold R=select";
     footer.appendChild(el("span", "", buttonHint));
     screen.appendChild(footer);
     app.appendChild(screen);
+
+    // Keep page scroll in sync with encoder moves (same distance up and down).
+    const nudge = state.scrollNudge;
+    state.scrollNudge = 0;
+    if (nudge === "start") {
+      app.scrollTop = 0;
+    } else if (nudge === "end") {
+      app.scrollTop = app.scrollHeight;
+    } else {
+      app.scrollTop = savedScroll;
+    }
+    if (focusedRow) {
+      requestAnimationFrame(() => {
+        const gap = 6;
+        const step = focusedRow.offsetHeight + gap;
+        if (nudge === 1 || nudge === -1) {
+          app.scrollTop = Math.max(0, savedScroll + nudge * step);
+        }
+        const appRect = app.getBoundingClientRect();
+        const rowRect = focusedRow.getBoundingClientRect();
+        const topPad = 56; // sticky topbar
+        const bottomPad = 12;
+        if (rowRect.bottom > appRect.bottom - bottomPad) {
+          app.scrollTop += rowRect.bottom - (appRect.bottom - bottomPad);
+        } else if (rowRect.top < appRect.top + topPad) {
+          app.scrollTop -= (appRect.top + topPad) - rowRect.top;
+        }
+        if (app.scrollTop < 0) app.scrollTop = 0;
+      });
+    }
   }
 
   function diagRow(label, on) {

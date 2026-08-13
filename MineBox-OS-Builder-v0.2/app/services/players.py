@@ -112,7 +112,8 @@ def _set_whitelist_enabled(enabled: bool) -> None:
 
 def _rcon(command: str) -> str:
     try:
-        return rcon.command(command)
+        # Do not mirror player admin actions into the live console log.
+        return rcon.command(command, mirror=False)
     except RuntimeError as error:
         raise PlayersError(str(error)) from error
 

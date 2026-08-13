@@ -2186,7 +2186,7 @@
                                 id="filter-rcon"
                                 checked
                             >
-                            Hide RCON connection messages
+                            Hide RCON / player-admin noise
                         </label>
 
                         <button
@@ -3419,6 +3419,21 @@
 
             // Command replies mirrored as [Rcon: ...] — still noisy for polling.
             if (normalized.includes("[rcon:")) {
+                return true;
+            }
+
+            // Player-admin RCON echoes (ban/op/pardon) — keep typed console commands.
+            const trimmed = String(line).trim();
+            if (/^>\s*(ban|pardon|op|deop|whitelist|kick)\b/i.test(trimmed)) {
+                return true;
+            }
+            if (
+                normalized.startsWith("banned player ")
+                || normalized.startsWith("unbanned player ")
+                || normalized.startsWith("opped ")
+                || normalized.startsWith("de-opped ")
+                || normalized.includes("nothing changed. the player already")
+            ) {
                 return true;
             }
 

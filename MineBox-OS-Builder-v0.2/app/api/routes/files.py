@@ -86,10 +86,15 @@ def create_directory(body: MkdirRequest) -> dict[str, Any]:
 @router.post("/upload")
 async def upload_file(
     path: str = Form(default=""),
+    relative_path: str = Form(default=""),
     file: UploadFile = File(...),
 ) -> dict[str, Any]:
     try:
-        result = await files.upload_file(path, file)
+        result = await files.upload_file(
+            path,
+            file,
+            relative_path=relative_path or None,
+        )
         listing = files.list_directory(path)
     except files.FilesError as error:
         raise _http_error(error) from error

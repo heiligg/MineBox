@@ -16,10 +16,30 @@ if command -v xset >/dev/null 2>&1; then
   xset -dpms >/dev/null 2>&1 || true
   xset s noblank >/dev/null 2>&1 || true
 fi
-if command -v xdotool >/dev/null 2>&1; then
-  # Hide idle cursor when unused (optional).
-  :
-fi
+
+# Hide the mouse pointer for the appliance panel (no pointer interaction).
+hide_cursor() {
+  local blank="${MINEBOX_KIOSK_PROFILE:-/var/lib/minebox/chromium-kiosk}/blank_cursor.xbm"
+  mkdir -p "$(dirname "$blank")" 2>/dev/null || true
+  cat >"$blank" <<'EOF'
+#define blank_width 1
+#define blank_height 1
+static unsigned char blank_bits[] = { 0x00 };
+EOF
+  if command -v xsetroot >/dev/null 2>&1; then
+    xsetroot -cursor "$blank" "$blank" >/dev/null 2>&1 || true
+  fi
+  if command -v unclutter-xfixes >/dev/null 2>&1; then
+    unclutter-xfixes --timeout 0 --jitter 0 --hide-on-touch --start-hidden >/dev/null 2>&1 &
+  elif command -v unclutter >/dev/null 2>&1; then
+    unclutter -idle 0 -root -noevents >/dev/null 2>&1 &
+  fi
+  if command -v xdotool >/dev/null 2>&1; then
+    # Park any residual pointer off the 800x480 panel.
+    xdotool mousemove 900 500 >/dev/null 2>&1 || true
+  fi
+}
+hide_cursor
 
 # Wait for backend health without a long fixed sleep primary path.
 for _ in $(seq 1 60); do

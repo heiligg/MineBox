@@ -164,15 +164,31 @@ def ensure_directory(path: str) -> dict[str, Any]:
     }
 
 
-async def upload_file(directory: str | None, upload: UploadFile) -> dict[str, Any]:
-    filename = Path(upload.filename or "").name
-    if not filename or _is_blocked_name(filename):
+def _upload_relative(filename: str | None, relative_path: str | None) -> str:
+    """Allow nested folder uploads while blocking path escape."""
+    raw = (relative_path or filename or "").replace("\\", "/").strip().lstrip("/")
+    if not raw or raw.endswith("/"):
         raise FilesError("Invalid upload filename.")
-    if "/" in filename or "\\" in filename:
+    parts: list[str] = []
+    for part in raw.split("/"):
+        if not part or part == ".":
+            continue
+        if part == ".." or _is_blocked_name(part):
+            raise FilesError("That path is not allowed.")
+        parts.append(part)
+    if not parts:
         raise FilesError("Invalid upload filename.")
+    return "/".join(parts)
 
+
+async def upload_file(
+    directory: str | None,
+    upload: UploadFile,
+    relative_path: str | None = None,
+) -> dict[str, Any]:
+    nested = _upload_relative(upload.filename, relative_path)
     relative_dir = _normalize_relative(directory)
-    relative = f"{relative_dir}/{filename}" if relative_dir else filename
+    relative = f"{relative_dir}/{nested}" if relative_dir else nested
     _world_guard(relative, mutating=True)
 
     root, folder, _ = _resolve_under_root(relative_dir)
@@ -183,13 +199,17 @@ async def upload_file(directory: str | None, upload: UploadFile) -> dict[str, An
     except OSError as error:
         raise FilesError(f"Could not prepare upload folder: {error}") from error
 
-    destination = (folder / filename).resolve()
+    destination = (folder / nested).resolve()
     try:
         destination.relative_to(root)
     except ValueError as error:
         raise FilesError("Upload path is outside the server folder.") from error
     if _is_blocked_name(destination.name):
         raise FilesError("That filename is not allowed.")
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise FilesError(f"Could not prepare upload folder: {error}") from error
 
     total = 0
     tmp_path = destination.with_name(destination.name + ".minebox-upload")

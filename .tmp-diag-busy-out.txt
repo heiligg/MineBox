@@ -1,0 +1,157 @@
+﻿========================================================================
+systemctl is-active minebox-ui minebox-display minebox-api 2>/dev/null; systemctl list-units 'minebox*' --no-pager
+active
+failed
+active
+  UNIT                        LOAD   ACTIVE SUB     DESCRIPTION
+  minebox-api.service         loaded active running MineBox API
+  minebox-captive.service     loaded active running MineBox hotspot captive portal (port 80)
+● minebox-display.service     loaded failed failed  MineBox graphical local display (800x480 kiosk)
+  minebox-firstboot.service   loaded active exited  MineBox first-boot initialization
+● minebox-maintenance.service loaded failed failed  MineBox scheduled maintenance
+  minebox-ui.service          loaded active running MineBox Appliance Interface (curses recovery on tty1)
+  minebox-maintenance.timer   loaded active waiting Run MineBox scheduled maintenance every minute
+
+Legend: LOAD   → Reflects whether the unit definition was properly loaded.
+        ACTIVE → The high-level unit activation state, i.e. generalization of SUB.
+        SUB    → The low-level unit activation state, values depend on unit type.
+
+7 loaded units listed. Pass --all to see loaded but inactive units, too.
+To show all installed unit files use 'systemctl list-unit-files'.
+
+========================================================================
+ps aux | grep -E 'main.py|gpio|minebox|chromium|display' | grep -v grep
+avahi        861  0.0  0.0   6096  3840 ?        Ss   21:37   0:01 avahi-daemon: running [minebox.local]
+root        9518  0.0  0.1  22144 13104 ?        Ss   21:58   0:00 sshd-session: minebox [priv]
+minebox     9532  0.0  0.1  23440 12928 ?        Ss   21:58   0:00 /usr/lib/systemd/systemd --user
+minebox     9534  0.0  0.0  24496  4720 ?        S    21:58   0:00 (sd-pam)
+minebox     9552  0.0  0.0   7360  3568 ?        Ss   21:58   0:00 /usr/bin/mpris-proxy
+minebox     9558  0.0  0.1  22208  8304 ?        S    21:58   0:00 sshd-session: minebox@pts/0
+minebox     9559  0.0  0.0   8192  4256 ?        Ss   21:58   0:00 /usr/bin/dbus-daemon --session --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+minebox     9560  0.0  0.0   9040  5856 pts/0    Ss+  21:58   0:00 -bash
+minebox    37506  0.9  0.3 342512 29056 tty1     Ssl+ 22:45   0:07 /usr/bin/python3 /opt/minebox/main.py
+root       42380  0.1  0.3 459184 26064 ?        Ss   22:55   0:00 /usr/bin/python3 /opt/minebox/scripts/minebox_captive.py
+minebox    42404  1.1  0.8 618800 69936 ?        Ssl  22:55   0:01 /usr/bin/python3 -m uvicorn api.server:app --host 0.0.0.0 --port 8080
+root       43971  4.1  0.1  21840 11728 ?        Ss   22:58   0:00 sshd-session: minebox [priv]
+minebox    43980  0.0  0.0  22208  8192 ?        S    22:58   0:00 sshd-session: minebox@notty
+minebox    43984  0.0  0.0   9344  4096 ?        R    22:58   0:00 ps aux
+
+========================================================================
+sudo -n gpioinfo gpiochip0 2>/dev/null | grep -E '23|17|line[[:space:]]+23|line[[:space:]]+17' || gpioinfo gpiochip0 2>/
+
+========================================================================
+sudo -n lsof /dev/gpiochip0 2>/dev/null || true
+
+========================================================================
+sudo -n fuser -v /dev/gpiochip0 2>/dev/null || true
+ 37506 42404
+========================================================================
+journalctl -u minebox-ui -n 40 --no-pager 2>/dev/null || true
+Aug 05 21:37:24 minebox systemd[1]: Started minebox-ui.service - MineBox Appliance Interface (curses recovery on tty1).
+Aug 05 21:37:24 minebox python3[1132]: smbus2 Seesaw init failed: [Errno 2] No such file or directory: '/dev/i2c-1'
+Aug 05 21:37:24 minebox python3[1132]: Seesaw encoder not detected at boot (bus=1 addr=0x36). Falling back to two-button navigation; boot continues.
+Aug 05 21:37:24 minebox python3[1132]: Could not claim button GPIOs: pin GPIO23 is already in use by <gpiozero.Button object on pin GPIO23, pull_up=True, is_active=False>
+Aug 05 22:35:19 minebox systemd[1]: Stopping minebox-ui.service - MineBox Appliance Interface (curses recovery on tty1)...
+Aug 05 22:35:19 minebox systemd[1]: minebox-ui.service: Main process exited, code=exited, status=1/FAILURE
+Aug 05 22:35:19 minebox systemd[1]: minebox-ui.service: Failed with result 'exit-code'.
+Aug 05 22:35:19 minebox systemd[1]: Stopped minebox-ui.service - MineBox Appliance Interface (curses recovery on tty1).
+Aug 05 22:35:19 minebox systemd[1]: minebox-ui.service: Consumed 1min 11.043s CPU time.
+Aug 05 22:35:20 minebox systemd[1]: Started minebox-ui.service - MineBox Appliance Interface (curses recovery on tty1).
+Aug 05 22:35:20 minebox python3[32669]: smbus2 Seesaw init failed: [Errno 2] No such file or directory: '/dev/i2c-1'
+Aug 05 22:35:20 minebox python3[32669]: Seesaw encoder not detected at boot (bus=1 addr=0x36). Falling back to two-button navigation; boot continues.
+Aug 05 22:35:20 minebox python3[32669]: Could not claim button GPIOs: pin GPIO23 is already in use by <gpiozero.Button object on pin GPIO23, pull_up=True, is_active=False>
+Aug 05 22:45:31 minebox systemd[1]: Stopping minebox-ui.service - MineBox Appliance Interface (curses recovery on tty1)...
+Aug 05 22:45:31 minebox systemd[1]: minebox-ui.service: Main process exited, code=exited, status=1/FAILURE
+Aug 05 22:45:31 minebox systemd[1]: minebox-ui.service: Failed with result 'exit-code'.
+Aug 05 22:45:31 minebox systemd[1]: Stopped minebox-ui.service - MineBox Appliance Interface (curses recovery on tty1).
+Aug 05 22:45:31 minebox systemd[1]: minebox-ui.service: Consumed 11.922s CPU time.
+Aug 05 22:45:31 minebox systemd[1]: Started minebox-ui.service - MineBox Appliance Interface (curses recovery on tty1).
+Aug 05 22:45:31 minebox python3[37506]: Could not claim button GPIOs: pin GPIO23 is already in use by <gpiozero.Button object on pin GPIO23, pull_up=True, is_active=False>
+
+========================================================================
+journalctl -u minebox-api --since '2026-08-05 21:30' --no-pager 2>/dev/null | grep -iE 'gpio|button|claim|busy|Pi5' | ta
+Aug 05 22:57:43 minebox python3[42404]: Could not claim button GPIOs: 'GPIO busy'
+
+========================================================================
+ls -la /opt/minebox/gpio_buttons.py /opt/minebox/main.py 2>/dev/null; head -5 /etc/systemd/system/minebox-ui.service 2>/
+-rw-r--r-- 1 minebox minebox 10430 Aug  5 22:55 /opt/minebox/gpio_buttons.py
+-rw-r--r-- 1 minebox minebox   590 Aug  5 22:55 /opt/minebox/main.py
+[Unit]
+Description=MineBox Appliance Interface (curses recovery on tty1)
+Documentation=file:///opt/minebox/docs/v1/Systemd_Services.md
+After=minebox-firstboot.service systemd-user-sessions.service minebox-api.service
+Requires=minebox-firstboot.service
+[Unit]
+Description=MineBox Appliance Interface (curses recovery on tty1)
+Documentation=file:///opt/minebox/docs/v1/Systemd_Services.md
+After=minebox-firstboot.service systemd-user-sessions.service minebox-api.service
+Requires=minebox-firstboot.service
+Wants=minebox-api.service
+Conflicts=getty@tty1.service
+# Recovery console must stay available; bound restart rate to avoid loops.
+StartLimitIntervalSec=120
+StartLimitBurst=8
+
+[Service]
+Type=simple
+User=minebox
+Group=minebox
+SupplementaryGroups=video input render gpio
+WorkingDirectory=/opt/minebox
+Environment=TERM=linux
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/bin/python3 /opt/minebox/main.py
+Restart=on-failure
+RestartSec=2
+TimeoutStartSec=30
+TimeoutStopSec=15
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+
+[Install]
+WantedBy=multi-user.target
+
+========================================================================
+cat /etc/systemd/system/minebox-display.service 2>/dev/null | head -50
+[Unit]
+Description=MineBox graphical local display (800x480 kiosk)
+Documentation=file:/opt/minebox/docs/v1/Display_Kiosk_Setup.md
+After=minebox-api.service
+Wants=minebox-api.service
+StartLimitIntervalSec=120
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=minebox
+Group=minebox
+SupplementaryGroups=video input render gpio
+WorkingDirectory=/opt/minebox
+Environment=PYTHONUNBUFFERED=1
+Environment=MINEBOX_DISPLAY_URL=http://127.0.0.1:8080/display
+Environment=MINEBOX_KIOSK_PROFILE=/var/lib/minebox/chromium-kiosk
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/var/lib/minebox/.Xauthority
+ExecStartPre=/usr/bin/install -d -o minebox -g minebox -m 700 /var/lib/minebox/chromium-kiosk
+ExecStart=/usr/bin/xinit /opt/minebox/scripts/minebox_display_session.sh -- :0 vt7 -nolisten tcp
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=90
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=graphical.target
+
+========================================================================
+python3 - <<'PY'
+{'profile': 'raspberry_pi5', 'left_button': None, 'right_button': None, 'encoder_press': None, 'encoder_available': False, 'encoder': None, 'encoder_status': 'NOT_CONFIGURED', 'left_led_status': 'NOT_CONFIGURED', 'right_led_status': 'NOT_CONFIGURED', 'fan': 'AUTO', 'temperature_c': 56.2, 'throttling': 'throttled=0x0', 'gpio_available': False, 'gpio_error': "Could not claim button GPIOs: 'GPIO busy'", 'gpio': {'left_bcm': 23, 'right_bcm': 17, 'verification': 'UNVERIFIED_AGAINST_PCB', 'encoder_interrupt_bcm': 24}, 'capabilities': {'left_button': 'UNAVAILABLE', 'right_button': 'UNAVAILABLE', 'encoder': 'NOT_CONFIGURED', 'left_led': 'NOT_CONFIGURED', 'right_led': 'NOT_CONFIGURED', 'fan': 'DEGRADED', 'temperature': 'OK', 'shutdown': 'OK', 'reboot': 'OK'}}
+
+STDERR: Could not claim button GPIOs: 'GPIO busy'
+
