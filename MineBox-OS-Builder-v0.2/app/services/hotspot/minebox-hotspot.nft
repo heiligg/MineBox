@@ -16,15 +16,17 @@ table inet minebox_filter {
         ip protocol igmp accept
         udp dport 5353 accept
 
-        # Hotspot clients: DHCP, DNS, captive/dashboard, Minecraft, SSH (bring-up)
-        iifname "wlan0" udp dport { 53, 67 } accept
+        # Hotspot clients: DHCP, DNS, captive/dashboard, Minecraft, voice chat, SSH
+        iifname "wlan0" udp dport { 53, 67, 24454 } accept
         iifname "wlan0" tcp dport { 53, 80, 8080, 25565, 22 } accept
 
-        # Trusted LAN (non-hotspot, non-tailscale): dashboard + Minecraft + SSH
+        # Trusted LAN (non-hotspot, non-tailscale): dashboard + Minecraft + SSH + voice chat
         iifname != "wlan0" iifname != "lo" iifname != "tailscale0" tcp dport { 80, 8080, 25565, 22 } accept
+        iifname != "wlan0" iifname != "lo" iifname != "tailscale0" udp dport 24454 accept
 
         # Tailscale: ports allowed at firewall; app-level expose_* toggles still required
         iifname "tailscale0" tcp dport { 80, 8080, 25565 } accept
+        iifname "tailscale0" udp dport 24454 accept
 
         # RCON never public; SSH already accepted on hotspot/LAN above
         tcp dport { 25575, 22 } drop

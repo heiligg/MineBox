@@ -15,6 +15,8 @@ HOTSPOT_ADDR = "192.168.4.1"
 # Minecraft default; overridable via env for tests.
 MINECRAFT_PORT = int(os.environ.get("MINEBOX_MINECRAFT_PORT", "25565"))
 DASHBOARD_PORT = int(os.environ.get("MINEBOX_DASHBOARD_PORT", "8080"))
+# Simple Voice Chat (and similar proximity-chat mods) use UDP, not TCP 25565.
+VOICECHAT_PORT = int(os.environ.get("MINEBOX_VOICECHAT_PORT", "24454"))
 
 
 def generate_nftables(
@@ -30,6 +32,7 @@ def generate_nftables(
     hs = validate_iface_name(hotspot_iface) or "wlan0"
     mc = MINECRAFT_PORT
     dash = DASHBOARD_PORT
+    vc = VOICECHAT_PORT
 
     ssh_hotspot = "tcp dport 22 accept" if allow_ssh_on_hotspot else ""
     # WAN: never accept dashboard/SSH/RCON from non-hotspot/non-lan in this base policy.
@@ -45,6 +48,10 @@ def generate_nftables(
         lan_rules.append(
             f'        iifname != "{hs}" iifname != "lo" iifname != "tailscale0" '
             f"tcp dport {mc} accept"
+        )
+        lan_rules.append(
+            f'        iifname != "{hs}" iifname != "lo" iifname != "tailscale0" '
+            f"udp dport {vc} accept"
         )
     if allow_ssh_on_lan:
         lan_rules.append(
@@ -93,12 +100,13 @@ table inet minebox_filter {{
         ip protocol igmp accept
         udp dport 5353 accept
 
-        # Hotspot: DHCP, DNS, dashboard, Minecraft (and optional SSH)
-        iifname "{hs}" udp dport {{ 53, 67 }} accept
+        # Hotspot: DHCP, DNS, dashboard, Minecraft, voice chat (and optional SSH)
+        iifname "{hs}" udp dport {{ 53, 67, {vc} }} accept
         iifname "{hs}" tcp dport {{ 53, 80, {dash}, {mc} }} accept
 {ssh_line}
         # Tailscale interface — only when present; exposure toggles are app-level.
         iifname "tailscale0" tcp dport {{ 80, {dash}, {mc} }} accept
+        iifname "tailscale0" udp dport {vc} accept
 
 {lan_block}
 
