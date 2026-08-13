@@ -192,10 +192,10 @@ class CaptiveHandler(BaseHTTPRequestHandler):
         try:
             if use_tls:
                 conn: http.client.HTTPConnection = http.client.HTTPSConnection(
-                    host, port, timeout=60, context=ssl._create_unverified_context()
+                    host, port, timeout=600, context=ssl._create_unverified_context()
                 )
             else:
-                conn = http.client.HTTPConnection(host, port, timeout=60)
+                conn = http.client.HTTPConnection(host, port, timeout=600)
             headers = {
                 key: value
                 for key, value in self.headers.items()

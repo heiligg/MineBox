@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import base64
 import shutil
+import tarfile
+import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +15,8 @@ from services import servers
 
 
 MAX_UPLOAD_BYTES = 256 * 1024 * 1024
+MAX_WORLD_UPLOAD_BYTES = 2 * 1024 * 1024 * 1024
+WORLD_SKIP_NAMES = {"session.lock"}
 BLOCKED_NAME_PREFIXES = (".minebox-",)
 BLOCKED_NAMES = {
     ".minebox-rcon-password",
@@ -303,3 +308,193 @@ def delete_path(path: str) -> dict[str, Any]:
         raise FilesError(f"Could not delete: {error}") from error
 
     return {"ok": True, "deleted": rel}
+
+
+def find_world_root(staging: Path) -> Path:
+    """Return the folder that contains level.dat inside an extracted save."""
+    direct = staging / "level.dat"
+    if direct.is_file():
+        return staging
+    matches = sorted(
+        (path.parent for path in staging.rglob("level.dat") if path.is_file()),
+        key=lambda path: len(path.relative_to(staging).parts),
+    )
+    if not matches:
+        raise FilesError(
+            "That file is not a Minecraft world save (missing level.dat). "
+            "Zip the folder inside .minecraft/saves, not the saves folder itself."
+        )
+    return matches[0]
+
+
+def _safe_extract_zip(archive: Path, dest: Path) -> None:
+    dest = dest.resolve()
+    dest.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive) as zf:
+        for info in zf.infolist():
+            name = info.filename.replace("\\", "/").lstrip("/")
+            if not name or name.endswith("/"):
+                continue
+            parts = Path(name).parts
+            if any(part in {".", ".."} or part.startswith("/") for part in parts):
+                raise FilesError("World zip contains an unsafe path.")
+            target = (dest / name).resolve()
+            try:
+                target.relative_to(dest)
+            except ValueError as error:
+                raise FilesError("World zip contains an unsafe path.") from error
+            if Path(name).name in WORLD_SKIP_NAMES:
+                continue
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with zf.open(info, "r") as source, target.open("wb") as handle:
+                    shutil.copyfileobj(source, handle)
+            except OSError as error:
+                raise FilesError(f"Could not extract world zip: {error}") from error
+
+
+def _safe_extract_tar(archive: Path, dest: Path) -> None:
+    dest = dest.resolve()
+    dest.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive, mode="r:*") as tar:
+        for member in tar.getmembers():
+            name = member.name.replace("\\", "/").lstrip("/")
+            if not member.isfile() or not name:
+                continue
+            parts = Path(name).parts
+            if any(part in {".", ".."} for part in parts):
+                raise FilesError("World archive contains an unsafe path.")
+            target = (dest / name).resolve()
+            try:
+                target.relative_to(dest)
+            except ValueError as error:
+                raise FilesError("World archive contains an unsafe path.") from error
+            if Path(name).name in WORLD_SKIP_NAMES:
+                continue
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                extracted = tar.extractfile(member)
+                if extracted is None:
+                    continue
+                with extracted, target.open("wb") as handle:
+                    shutil.copyfileobj(extracted, handle)
+            except OSError as error:
+                raise FilesError(f"Could not extract world archive: {error}") from error
+
+
+def _copy_world(source: Path, dest: Path) -> None:
+    dest.mkdir(parents=True, exist_ok=True)
+    for child in source.iterdir():
+        if child.name in WORLD_SKIP_NAMES or _is_blocked_name(child.name):
+            continue
+        target = dest / child.name
+        if child.is_dir():
+            shutil.copytree(child, target, dirs_exist_ok=True)
+        elif child.is_file():
+            shutil.copy2(child, target)
+
+
+async def install_world_save(upload: UploadFile) -> dict[str, Any]:
+    """Replace the active multiplayer world with a zipped singleplayer save."""
+    filename = (upload.filename or "world.zip").lower()
+    root = _active_root()
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    incoming = root / f".minebox-world-upload-{stamp}"
+    staging = root / f".minebox-world-extract-{stamp}"
+    live_world = root / "world"
+    backup_world = root / f"world.bak-{stamp}"
+
+    incoming.parent.mkdir(parents=True, exist_ok=True)
+    total = 0
+    try:
+        with incoming.open("wb") as handle:
+            while True:
+                chunk = await upload.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > MAX_WORLD_UPLOAD_BYTES:
+                    raise FilesError(
+                        "World upload exceeds the "
+                        f"{MAX_WORLD_UPLOAD_BYTES // (1024 * 1024)} MB limit."
+                    )
+                handle.write(chunk)
+    except FilesError:
+        incoming.unlink(missing_ok=True)
+        raise
+    except OSError as error:
+        incoming.unlink(missing_ok=True)
+        raise FilesError(f"Could not save world upload: {error}") from error
+    finally:
+        await upload.close()
+
+    if total < 32:
+        incoming.unlink(missing_ok=True)
+        raise FilesError("That world upload was empty.")
+
+    was_running = minecraft.is_running()
+    try:
+        if filename.endswith(".tar.gz") or filename.endswith(".tgz"):
+            _safe_extract_tar(incoming, staging)
+        else:
+            try:
+                _safe_extract_zip(incoming, staging)
+            except zipfile.BadZipFile as error:
+                raise FilesError(
+                    "That file is not a zip. On Windows, right-click the save "
+                    "folder in .minecraft\\saves and choose Send to → "
+                    "Compressed (zipped) folder, then upload the .zip."
+                ) from error
+
+        world_root = find_world_root(staging)
+        if not (world_root / "region").is_dir():
+            raise FilesError(
+                "That save is missing its region folder. Zip the world folder "
+                "itself (the one that contains level.dat), not only some of the files."
+            )
+
+        if was_running:
+            stop = minecraft.stop_service()
+            if not stop.ok:
+                raise FilesError(
+                    "Could not stop Minecraft before replacing the world: "
+                    + (stop.stderr or stop.stdout or "unknown error")
+                )
+
+        if live_world.exists():
+            if backup_world.exists():
+                shutil.rmtree(backup_world, ignore_errors=True)
+            live_world.rename(backup_world)
+
+        try:
+            _copy_world(world_root, live_world)
+        except OSError as error:
+            raise FilesError(f"Could not install the world: {error}") from error
+        if not (live_world / "level.dat").is_file() or not (live_world / "region").is_dir():
+            raise FilesError("World install failed verification.")
+    except Exception:
+        incoming.unlink(missing_ok=True)
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+    incoming.unlink(missing_ok=True)
+    shutil.rmtree(staging, ignore_errors=True)
+
+    listing = list_directory("")
+    return {
+        "ok": True,
+        "bytes": total,
+        "world": "world",
+        "backup": backup_world.name if backup_world.exists() else None,
+        "server_stopped": was_running,
+        "message": (
+            "Singleplayer save installed as the multiplayer world. "
+            + (
+                f"The previous world was kept as {backup_world.name}. "
+                if backup_world.exists()
+                else ""
+            )
+            + "Start the server to play it."
+        ),
+        **listing,
+    }

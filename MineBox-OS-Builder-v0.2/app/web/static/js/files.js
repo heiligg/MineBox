@@ -628,6 +628,171 @@
         return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
     }
 
+    const CRC_TABLE = (() => {
+        const table = new Uint32Array(256);
+        for (let index = 0; index < 256; index += 1) {
+            let value = index;
+            for (let bit = 0; bit < 8; bit += 1) {
+                value = value & 1 ? 0xEDB88320 ^ (value >>> 1) : value >>> 1;
+            }
+            table[index] = value >>> 0;
+        }
+        return table;
+    })();
+
+    function crc32(bytes) {
+        let value = 0xFFFFFFFF;
+        for (let index = 0; index < bytes.length; index += 1) {
+            value = CRC_TABLE[(value ^ bytes[index]) & 0xFF] ^ (value >>> 8);
+        }
+        return (value ^ 0xFFFFFFFF) >>> 0;
+    }
+
+    function u16(value) {
+        return new Uint8Array([value & 0xFF, (value >>> 8) & 0xFF]);
+    }
+
+    function u32(value) {
+        return new Uint8Array([
+            value & 0xFF,
+            (value >>> 8) & 0xFF,
+            (value >>> 16) & 0xFF,
+            (value >>> 24) & 0xFF,
+        ]);
+    }
+
+    function isZipName(name) {
+        const lower = String(name || "").toLowerCase();
+        return lower.endsWith(".zip") || lower.endsWith(".mcworld") || lower.endsWith(".tar.gz");
+    }
+
+    function looksLikeWorld(items) {
+        return (items || []).some((item) => {
+            const relative = String(item.relative || (item.file && item.file.name) || "")
+                .replace(/\\/g, "/");
+            return relative === "level.dat" || relative.endsWith("/level.dat");
+        });
+    }
+
+    async function zipWorldItems(items) {
+        const encoder = new TextEncoder();
+        const locals = [];
+        const centrals = [];
+        let offset = 0;
+        const files = items.filter((item) => item.kind === "file" && item.file);
+        let count = 0;
+        for (let index = 0; index < files.length; index += 1) {
+            const item = files[index];
+            const relative = String(item.relative || item.file.name || "")
+                .replace(/\\/g, "/")
+                .replace(/^\/+/, "");
+            if (!relative || relative.endsWith("session.lock")) {
+                continue;
+            }
+            showMessage(`Packing world ${index + 1}/${files.length}: ${relative}`);
+            const bytes = new Uint8Array(await item.file.arrayBuffer());
+            const nameBytes = encoder.encode(relative);
+            const crc = crc32(bytes);
+            const local = [
+                u32(0x04034b50),
+                u16(20),
+                u16(0),
+                u16(0),
+                u16(0),
+                u16(0),
+                u32(crc),
+                u32(bytes.length),
+                u32(bytes.length),
+                u16(nameBytes.length),
+                u16(0),
+                nameBytes,
+                bytes,
+            ];
+            locals.push(...local);
+            centrals.push(
+                u32(0x02014b50),
+                u16(20),
+                u16(20),
+                u16(0),
+                u16(0),
+                u16(0),
+                u16(0),
+                u32(crc),
+                u32(bytes.length),
+                u32(bytes.length),
+                u16(nameBytes.length),
+                u16(0),
+                u16(0),
+                u16(0),
+                u16(0),
+                u32(0),
+                u32(offset),
+                nameBytes
+            );
+            offset += 30 + nameBytes.length + bytes.length;
+            count += 1;
+        }
+        if (!count) {
+            throw new Error("That folder did not contain a Minecraft world.");
+        }
+        const centralSize = centrals.reduce((sum, part) => sum + part.length, 0);
+        const end = [
+            u32(0x06054b50),
+            u16(0),
+            u16(0),
+            u16(count),
+            u16(count),
+            u32(centralSize),
+            u32(offset),
+            u16(0),
+        ];
+        return new Blob([...locals, ...centrals, ...end], { type: "application/zip" });
+    }
+
+    async function uploadWorldFile(file, filename) {
+        if (busy) {
+            showMessage("Wait for the current file operation to finish.", "warning");
+            return;
+        }
+        if (!window.confirm(
+            "Replace the multiplayer world with this singleplayer save? "
+            + "The current world will be renamed as a backup, and the server will be stopped."
+        )) {
+            return;
+        }
+        busy = true;
+        try {
+            showMessage("Uploading world save… this can take a minute.");
+            const form = new FormData();
+            form.append("file", file, filename || file.name || "world.zip");
+            const response = await fetch(`${API_BASE}/upload-world`, {
+                method: "POST",
+                credentials: "same-origin",
+                body: form,
+            });
+            const payload = await response.json().catch(() => ({}));
+            if (!response.ok) {
+                throw new Error(detailFromPayload(payload));
+            }
+            showMessage(payload.message || "World save installed.", "success");
+            if (payload.entries) {
+                renderListing(payload);
+            } else {
+                await loadPath("");
+                showMessage(payload.message || "World save installed.", "success");
+            }
+        } catch (error) {
+            showMessage(error.message || "Could not install that world save.", "error");
+        } finally {
+            busy = false;
+        }
+    }
+
+    async function uploadWorldFromItems(items) {
+        const blob = await zipWorldItems(items);
+        await uploadWorldFile(blob, "world-save.zip");
+    }
+
     async function ensureFolder(relative) {
         const path = currentPath ? joinPath(currentPath, relative) : relative;
         await api(`${API_BASE}/mkdir`, {
@@ -753,9 +918,13 @@
 
     async function uploadFolderSelected() {
         const items = filesFromList(folderInput.files);
+        if (looksLikeWorld(items)) {
+            await uploadWorldFromItems(items);
+            return;
+        }
         if (items.length > 1 && !items.some((item) => item.relative.includes("/"))) {
             showMessage(
-                "Folder names were missing from that picker. Drop the folder onto the Files panel instead.",
+                "Folder names were missing from that picker. For a Minecraft world, zip the save folder and use Upload world save.",
                 "warning"
             );
         }
@@ -838,6 +1007,21 @@
         });
         folderInput = folderPicker.input;
 
+        const worldPicker = makePicker({
+            label: "Upload world save",
+            primary: false,
+            multiple: false,
+            directory: false,
+            accept: ".zip,.mcworld,.tar.gz,application/zip",
+            onChange: async () => {
+                const file = worldPicker.input.files && worldPicker.input.files[0];
+                worldPicker.input.value = "";
+                if (file) {
+                    await uploadWorldFile(file, file.name);
+                }
+            },
+        });
+
         mkdirInput = document.createElement("input");
         mkdirInput.type = "text";
         mkdirInput.placeholder = "New folder name";
@@ -858,6 +1042,7 @@
         toolbar.append(
             filesPicker.wrap,
             folderPicker.wrap,
+            worldPicker.wrap,
             mkdirInput,
             mkdirBtn,
             refreshBtn
@@ -866,7 +1051,7 @@
         listing = document.createElement("div");
         dropZone = document.createElement("div");
         dropZone.className = "files-drop";
-        dropZone.textContent = "Drop a folder anywhere in this Files panel. Nested folders are kept.";
+        dropZone.textContent = "To load a singleplayer world: zip the save folder (the one with level.dat) and use Upload world save, or drop that .zip here.";
         message = document.createElement("div");
         message.className = "files-message";
 
@@ -876,7 +1061,7 @@
         return true;
     }
 
-    function makePicker({ label, primary, multiple, directory, onChange }) {
+    function makePicker({ label, primary, multiple, directory, accept, onChange }) {
         const wrap = document.createElement("div");
         wrap.className = "files-picker";
         const button = document.createElement("button");
@@ -888,6 +1073,9 @@
         input.type = "file";
         if (multiple) {
             input.multiple = true;
+        }
+        if (accept) {
+            input.accept = accept;
         }
         if (directory) {
             input.setAttribute("webkitdirectory", "");
@@ -945,10 +1133,19 @@
                 .then((items) => {
                     if (!items.length) {
                         showMessage(
-                            "Could not read that folder. Use Upload folder, or drop the folder on the dashed box.",
+                            "Could not read that drop. Zip the world save folder and use Upload world save.",
                             "warning"
                         );
                         return;
+                    }
+                    const zipItem = items.find((item) =>
+                        item.kind === "file" && item.file && isZipName(item.file.name)
+                    );
+                    if (items.length === 1 && zipItem) {
+                        return uploadWorldFile(zipItem.file, zipItem.file.name);
+                    }
+                    if (looksLikeWorld(items)) {
+                        return uploadWorldFromItems(items);
                     }
                     return uploadItems(items);
                 })

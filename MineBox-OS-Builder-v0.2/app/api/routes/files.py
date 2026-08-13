@@ -23,7 +23,7 @@ def _status_for(message: str) -> int:
     normalized = message.lower()
     if "not found" in normalized or "missing" in normalized:
         return 404
-    if "stop the minecraft server" in normalized:
+    if "stop the minecraft server" in normalized or "stop minecraft" in normalized:
         return 409
     if (
         "not allowed" in normalized
@@ -113,6 +113,14 @@ async def upload_file(
     except files.FilesError as error:
         raise _http_error(error) from error
     return {"ok": True, **result, **listing}
+
+
+@router.post("/upload-world")
+async def upload_world(file: UploadFile = File(...)) -> dict[str, Any]:
+    try:
+        return await files.install_world_save(file)
+    except files.FilesError as error:
+        raise _http_error(error) from error
 
 
 @router.delete("")

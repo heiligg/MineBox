@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -45,6 +47,28 @@ class FilesUploadTests(unittest.TestCase):
             _upload_relative(None, "../secret.txt")
         with self.assertRaises(FilesError):
             _upload_relative("", "mods/")
+
+    def test_find_world_root_nested_save(self) -> None:
+        from services.files import find_world_root
+
+        with tempfile.TemporaryDirectory() as tmp:
+            staging = Path(tmp)
+            world = staging / "My Survival"
+            (world / "region").mkdir(parents=True)
+            (world / "level.dat").write_bytes(b"dat")
+            (world / "region" / "r.0.0.mca").write_bytes(b"mca")
+            self.assertEqual(find_world_root(staging), world)
+
+    def test_zip_slip_rejected(self) -> None:
+        from services.files import FilesError, _safe_extract_zip
+
+        with tempfile.TemporaryDirectory() as tmp:
+            archive = Path(tmp) / "bad.zip"
+            dest = Path(tmp) / "out"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("../secret.txt", "nope")
+            with self.assertRaises(FilesError):
+                _safe_extract_zip(archive, dest)
 
 
 if __name__ == "__main__":
