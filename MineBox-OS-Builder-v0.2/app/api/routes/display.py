@@ -42,6 +42,7 @@ class InjectEventRequest(BaseModel):
 class DisplayActionRequest(BaseModel):
     action: str = Field(min_length=3, max_length=64)
     confirm: bool = False
+    server_id: str = Field(default="", max_length=48)
 
 
 def _client_host(request: Request) -> str | None:
@@ -199,6 +200,27 @@ def snapshot(request: Request) -> dict[str, Any]:
         except Exception:
             network = {"remote_access_state": "DISABLED"}
 
+    servers_payload: dict[str, Any] = {"active_id": None, "items": []}
+    try:
+        from services import servers as server_service
+
+        active_id = server_service.active_server_id()
+        servers_payload = {
+            "active_id": active_id,
+            "items": [
+                {
+                    "server_id": item.server_id,
+                    "name": item.name,
+                    "version": item.version,
+                    "loader": item.loader,
+                    "active": item.server_id == active_id,
+                }
+                for item in server_service.list_servers()
+            ],
+        }
+    except Exception:
+        servers_payload = {"active_id": None, "items": []}
+
     return {
         "ok": not stale,
         "stale": stale,
@@ -207,6 +229,7 @@ def snapshot(request: Request) -> dict[str, Any]:
         "foundation": foundation,
         "backups": backups,
         "network": network,
+        "servers": servers_payload,
         "action_map": resolve_action_map(
             encoder_available=get_display_bridge().encoder_connected
         ).to_public_dict(),
@@ -264,7 +287,7 @@ def display_action(request: Request, body: DisplayActionRequest) -> dict[str, An
         pass
 
     try:
-        result = _execute_display_action(action)
+        result = _execute_display_action(action, server_id=body.server_id)
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -295,7 +318,7 @@ def _sanitize_network(raw: dict[str, Any]) -> dict[str, Any]:
     return safe
 
 
-def _execute_display_action(action: str) -> dict[str, Any]:
+def _execute_display_action(action: str, server_id: str = "") -> dict[str, Any]:
     if action == "server_start":
         from services import minecraft
 
@@ -311,6 +334,18 @@ def _execute_display_action(action: str) -> dict[str, Any]:
 
         r = minecraft.restart()
         return {"ok": r.ok, "message": r.stdout or r.stderr}
+    if action == "server_select":
+        from api.routes.servers import SelectServerRequest, select_active_server
+
+        target = (server_id or "").strip()
+        if not target:
+            raise HTTPException(status_code=400, detail="Choose a server to switch to.")
+        switched = select_active_server(SelectServerRequest(server_id=target))
+        return {
+            "ok": True,
+            "message": switched.get("message") or "Server switched.",
+            "server": switched.get("server"),
+        }
     if action == "backup_create":
         from services import backups
 

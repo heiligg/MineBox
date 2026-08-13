@@ -162,6 +162,8 @@ class DisplayCp5Tests(unittest.TestCase):
         self.assertIn("device_shutdown", DESTRUCTIVE_ACTIONS)
         self.assertNotIn("console", ALLOWED_DISPLAY_ACTIONS)
         self.assertNotIn("server_start", DESTRUCTIVE_ACTIONS)
+        self.assertIn("server_select", ALLOWED_DISPLAY_ACTIONS)
+        self.assertIn("server_select", DESTRUCTIVE_ACTIONS)
 
     def test_kiosk_script_flags(self) -> None:
         script = (ROOT / "app" / "scripts" / "minebox_kiosk_launch.sh").read_text(

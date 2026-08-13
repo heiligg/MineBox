@@ -2403,6 +2403,7 @@
         const commandHistory = [];
         let commandHistoryPosition = 0;
         let consoleCleared = false;
+        let consoleClearBaseline = [];
         let lastConsoleLines = [];
         let serverIsRunning =
             statusLight.classList.contains("online");
@@ -3440,22 +3441,44 @@
             return false;
         }
 
+        function suffixAfterClear(lines) {
+            if (!consoleCleared) {
+                return lines;
+            }
+            const baseline = consoleClearBaseline;
+            if (!baseline.length) {
+                return lines;
+            }
+            if (
+                lines.length === baseline.length &&
+                lines.every((line, index) => line === baseline[index])
+            ) {
+                return [];
+            }
+            const tail = baseline.slice(-Math.min(8, baseline.length));
+            outer: for (let index = 0; index <= lines.length - tail.length; index += 1) {
+                for (let offset = 0; offset < tail.length; offset += 1) {
+                    if (lines[index + offset] !== tail[offset]) {
+                        continue outer;
+                    }
+                }
+                return lines.slice(index + tail.length);
+            }
+            if (
+                lines.length &&
+                lines[lines.length - 1] === baseline[baseline.length - 1]
+            ) {
+                return [];
+            }
+            return lines;
+        }
+
         function renderConsole(lines) {
             lastConsoleLines = Array.isArray(lines)
                 ? lines
                 : [];
 
-            if (consoleCleared) {
-                consoleWindow.replaceChildren();
-
-                const empty = document.createElement("div");
-                empty.className = "console-empty-state";
-                empty.textContent =
-                    "Console view cleared. New log entries will appear automatically.";
-
-                consoleWindow.appendChild(empty);
-                return;
-            }
+            const sourceLines = suffixAfterClear(lastConsoleLines);
 
             const distanceFromBottom =
                 consoleWindow.scrollHeight -
@@ -3466,7 +3489,7 @@
                 distanceFromBottom < 80;
 
             const visibleLines =
-                lastConsoleLines.filter(
+                sourceLines.filter(
                     line => !shouldHideConsoleLine(line)
                 );
 
@@ -3480,7 +3503,9 @@
                 empty.className =
                     "console-empty-state";
 
-                empty.textContent = serverIsRunning
+                empty.textContent = consoleCleared
+                    ? "Console view cleared. New log entries will appear automatically."
+                    : serverIsRunning
                     ? "Waiting for Minecraft console output..."
                     : "Minecraft server is offline.";
 
@@ -3531,14 +3556,6 @@
                         ? data.console
                         : data;
                 const lines = getConsoleLines(data);
-
-                if (
-                    consoleCleared &&
-                    lines.length >
-                        lastConsoleLines.length
-                ) {
-                    consoleCleared = false;
-                }
 
                 if (
                     (!lines || lines.length === 0) &&
@@ -3680,8 +3697,6 @@
                     "success"
                 );
 
-                consoleCleared = false;
-
                 setTimeout(
                     refreshConsole,
                     250
@@ -3784,10 +3799,11 @@
             "click",
             () => {
                 consoleCleared = true;
-                renderConsole([]);
+                consoleClearBaseline = lastConsoleLines.slice();
+                renderConsole(lastConsoleLines);
 
                 showConsoleCommandMessage(
-                    "Dashboard view cleared. The real log file was not deleted."
+                    "Dashboard view cleared. New log lines will still appear."
                 );
             }
         );
@@ -3795,7 +3811,6 @@
         filterRconCheckbox.addEventListener(
             "change",
             () => {
-                consoleCleared = false;
                 renderConsole(lastConsoleLines);
             }
         );

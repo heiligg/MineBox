@@ -130,6 +130,7 @@ DESTRUCTIVE_ACTIONS = frozenset(
     {
         "server_stop",
         "server_restart",
+        "server_select",
         "device_reboot",
         "device_shutdown",
     }
@@ -141,6 +142,7 @@ ALLOWED_DISPLAY_ACTIONS = frozenset(
         "server_start",
         "server_stop",
         "server_restart",
+        "server_select",
         "backup_create",
         "services_restart",
         "device_reboot",

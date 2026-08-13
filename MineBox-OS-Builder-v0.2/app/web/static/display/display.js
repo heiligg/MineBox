@@ -17,6 +17,7 @@
     progress: "",
     confirmAction: null,
     confirmLabel: "",
+    pendingServerId: "",
     diagnosticsMode: false,
     actionMap: null,
     idleTimer: null,
@@ -30,6 +31,7 @@
       title: "Home",
       items: () => [
         { id: "nav_server", label: "Server" },
+        { id: "nav_servers", label: "Change server" },
         { id: "nav_backups", label: "Backups" },
         { id: "nav_network", label: "Network" },
         { id: "nav_system", label: "System" },
@@ -44,6 +46,10 @@
     server_details: {
       title: "Server details",
       items: () => [{ id: "nav_back", label: "Back" }],
+    },
+    servers: {
+      title: "Change server",
+      items: () => serverChoices(),
     },
     backups: {
       title: "Backups",
@@ -145,8 +151,29 @@
       items.push({ id: "server_stop", label: "Stop" });
       items.push({ id: "server_restart", label: "Restart" });
     }
+    items.push({ id: "nav_servers", label: "Change server" });
     items.push({ id: "backup_create", label: "Backup" });
     items.push({ id: "nav_server_details", label: "Details" });
+    items.push({ id: "nav_back", label: "Back" });
+    return items;
+  }
+
+  function serverList() {
+    const payload = (state.snapshot && state.snapshot.servers) || {};
+    return Array.isArray(payload.items) ? payload.items : [];
+  }
+
+  function serverChoices() {
+    const items = serverList().map((server) => ({
+      id: "server_select",
+      serverId: server.server_id,
+      active: !!server.active,
+      label:
+        (server.active ? "● " : "○ ") +
+        (server.name || server.server_id) +
+        (server.version ? "  " + server.version : "") +
+        (server.active ? "  (active)" : ""),
+    }));
     items.push({ id: "nav_back", label: "Back" });
     return items;
   }
@@ -213,6 +240,10 @@
       go("system");
       return;
     }
+    if (state.screen === "servers" || state.screen === "server_details") {
+      go("server");
+      return;
+    }
     if (state.screen !== "home" && state.screen !== "setup" && state.screen !== "degraded") {
       go("home");
     }
@@ -235,7 +266,7 @@
     const items = currentItems();
     const item = items[state.focus];
     if (!item) return;
-    await activate(item.id, item.label);
+    await activate(item.id, item.label, item);
   }
 
   function askConfirm(action, label) {
@@ -245,14 +276,24 @@
     go("confirm");
   }
 
-  async function activate(id, label) {
+  async function activate(id, label, item) {
     if (state.diagnosticsMode && id !== "nav_back") {
       state.message = "Diagnostics mode — actions disabled.";
       return;
     }
     if (id === "nav_back") return intentBack();
     if (id === "nav_server") return go("server");
+    if (id === "nav_servers") return go("servers");
     if (id === "nav_server_details") return go("server_details");
+    if (id === "server_select") {
+      if (item && item.active) {
+        state.message = "That server is already active.";
+        return;
+      }
+      state.pendingServerId = (item && item.serverId) || "";
+      askConfirm("server_select", "Switch to " + label.replace(/^[●○]\s*/, "") + "? The current server will stop.");
+      return;
+    }
     if (id === "nav_backups") return go("backups");
     if (id === "nav_network") return go("network");
     if (id === "nav_system") return go("system");
@@ -282,7 +323,11 @@
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json", Accept: "application/json" },
-        body: JSON.stringify({ action, confirm: !!confirm }),
+        body: JSON.stringify({
+          action,
+          confirm: !!confirm,
+          server_id: action === "server_select" ? state.pendingServerId || "" : "",
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -302,6 +347,9 @@
         (data.result && data.result.backup && ("Backup created: " + data.result.backup)) ||
         "Done.";
       state.progress = "";
+      if (action === "server_select") {
+        state.pendingServerId = "";
+      }
       await refresh(true);
     } catch (err) {
       state.progress = "";
