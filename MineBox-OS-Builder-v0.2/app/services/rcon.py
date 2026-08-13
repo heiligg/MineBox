@@ -142,7 +142,7 @@ def ensure_properties(server_dir: Path | None = None) -> dict[str, str]:
         "enable-rcon": "true",
         "rcon.port": rcon_port,
         "rcon.password": password,
-        "broadcast-rcon-to-ops": "true",
+        "broadcast-rcon-to-ops": "false",
     }
 
     existing_lines: list[str] = []
@@ -311,22 +311,29 @@ def send(command: str, timeout: float = 4.0, *, enforce_allowlist: bool = False)
             return CommandResult(False, stderr=f"RCON unavailable: {exc}")
 
 
-def command(command_text: str, timeout: float = 4.0) -> str:
+_SILENT_RCON_COMMANDS = frozenset({"list", "seed"})
+
+
+def command(command_text: str, timeout: float = 4.0, *, mirror: bool = True) -> str:
     """Execute an RCON command and return the response body (or raise)."""
     result = send(command_text, timeout=timeout)
-    try:
-        from services import logs
+    text = (command_text or "").strip()
+    verb = text.split(" ", 1)[0].lower() if text else ""
+    silent = verb in _SILENT_RCON_COMMANDS or text.lower().startswith("whitelist list")
+    if mirror and not silent:
+        try:
+            from services import logs
 
-        logs.append_console_line(f"> {command_text.strip()}")
-        if result.ok:
-            body = (result.stdout or "").strip()
-            logs.append_console_line(body if body else "(ok)")
-        else:
-            logs.append_console_line(
-                f"(rcon error) {result.stderr or 'command failed'}"
-            )
-    except Exception:
-        pass
+            logs.append_console_line(f"> {text}")
+            if result.ok:
+                body = (result.stdout or "").strip()
+                logs.append_console_line(body if body else "(ok)")
+            else:
+                logs.append_console_line(
+                    f"(rcon error) {result.stderr or 'command failed'}"
+                )
+        except Exception:
+            pass
     if not result.ok:
         raise RuntimeError(result.stderr or "RCON command failed.")
     return result.stdout or ""
