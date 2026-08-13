@@ -87,6 +87,7 @@ def create_directory(body: MkdirRequest) -> dict[str, Any]:
 async def upload_file(
     path: str = Form(default=""),
     relative_path: str = Form(default=""),
+    rel: str = Form(default=""),
     file: UploadFile = File(...),
     refresh: bool = Query(default=True),
     nested: str = Query(default=""),
@@ -100,7 +101,11 @@ async def upload_file(
             path,
             file,
             relative_path=relative_path or None,
-            extra_paths=[nested, x_minebox_relative_path or ""],
+            extra_paths=[
+                nested,
+                x_minebox_relative_path or "",
+                files.decode_rel_token(rel),
+            ],
         )
         if not refresh:
             return {"ok": True, **result}

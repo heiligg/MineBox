@@ -164,17 +164,20 @@
                 background: rgba(255, 180, 60, 0.12);
                 color: #ffd27a;
             }
-            .files-hidden-input {
-                position: absolute;
-                width: 1px;
-                height: 1px;
-                padding: 0;
-                margin: -1px;
+            .files-picker {
+                position: relative;
+                display: inline-flex;
                 overflow: hidden;
-                clip: rect(0, 0, 0, 0);
-                white-space: nowrap;
-                border: 0;
+                border-radius: 10px;
+            }
+            .files-picker input[type="file"] {
+                position: absolute;
+                inset: 0;
+                width: 100%;
+                height: 100%;
                 opacity: 0;
+                cursor: pointer;
+                font-size: 64px;
             }
             .files-panel { position: relative; }
             .files-panel.files-drop-active {
@@ -553,18 +556,13 @@
 
     function captureDrop(event) {
         const entries = [];
-        const handlePromises = [];
         const items = event.dataTransfer && event.dataTransfer.items;
+        // Call webkitGetAsEntry before touching .files. Chrome drops directory
+        // entries if getAsFileSystemHandle() or .files is read first, especially
+        // on http:// LAN pages.
         if (items) {
             for (let i = 0; i < items.length; i += 1) {
                 const item = items[i];
-                if (typeof item.getAsFileSystemHandle === "function") {
-                    try {
-                        handlePromises.push(item.getAsFileSystemHandle());
-                    } catch {
-                        // HTTP pages may not allow File System Access.
-                    }
-                }
                 if (typeof item.webkitGetAsEntry === "function") {
                     const entry = item.webkitGetAsEntry();
                     if (entry) {
@@ -573,11 +571,7 @@
                 }
             }
         }
-        return {
-            entries,
-            handlePromises,
-            files: event.dataTransfer ? event.dataTransfer.files : null,
-        };
+        return { entries };
     }
 
     function readAllEntries(dirEntry) {
@@ -617,49 +611,21 @@
         return items;
     }
 
-    async function walkHandle(handle, prefix) {
-        const relative = prefix ? `${prefix}/${handle.name}` : handle.name;
-        if (handle.kind === "file") {
-            const file = await handle.getFile();
-            return [{ kind: "file", file: attachRelative(file, relative), relative }];
+    async function itemsFromDrop(captured) {
+        const walked = [];
+        for (const entry of captured.entries || []) {
+            walked.push(...await walkEntry(entry, ""));
         }
-        const items = [{ kind: "dir", relative }];
-        if (typeof handle.values !== "function") {
-            return items;
-        }
-        for await (const child of handle.values()) {
-            items.push(...await walkHandle(child, relative));
-        }
-        return items;
+        return walked;
     }
 
-    async function itemsFromDrop(captured) {
-        if (captured.entries && captured.entries.length) {
-            const walked = [];
-            for (const entry of captured.entries) {
-                walked.push(...await walkEntry(entry, ""));
-            }
-            if (walked.length) {
-                return walked;
-            }
-        }
-        if (captured.handlePromises && captured.handlePromises.length) {
-            try {
-                const handles = await Promise.all(captured.handlePromises);
-                const walked = [];
-                for (const handle of handles) {
-                    if (handle) {
-                        walked.push(...await walkHandle(handle, ""));
-                    }
-                }
-                if (walked.length) {
-                    return walked;
-                }
-            } catch {
-                // HTTP pages may reject File System Access handles.
-            }
-        }
-        return filesFromList(captured.files);
+    function encodeRel(relative) {
+        const bytes = new TextEncoder().encode(relative);
+        let binary = "";
+        bytes.forEach((byte) => {
+            binary += String.fromCharCode(byte);
+        });
+        return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
     }
 
     async function ensureFolder(relative) {
@@ -680,6 +646,7 @@
         const form = new FormData();
         form.append("path", currentPath || "");
         form.append("relative_path", relative);
+        form.append("rel", encodeRel(relative));
         form.append("file", file, file.name);
         const params = new URLSearchParams({ refresh: "false" });
         if (relative.length < 800) {
@@ -785,7 +752,14 @@
     }
 
     async function uploadFolderSelected() {
-        await uploadFiles(folderInput.files);
+        const items = filesFromList(folderInput.files);
+        if (items.length > 1 && !items.some((item) => item.relative.includes("/"))) {
+            showMessage(
+                "Folder names were missing from that picker. Drop the folder onto the Files panel instead.",
+                "warning"
+            );
+        }
+        await uploadItems(items);
     }
 
     async function deleteEntry(entry) {
@@ -846,35 +820,23 @@
         const toolbar = document.createElement("div");
         toolbar.className = "files-toolbar";
 
-        const uploadBtn = document.createElement("button");
-        uploadBtn.type = "button";
-        uploadBtn.className = "files-button primary";
-        uploadBtn.textContent = "Upload files";
-        uploadInput = document.createElement("input");
-        uploadInput.type = "file";
-        uploadInput.multiple = true;
-        uploadInput.className = "files-hidden-input";
-        uploadBtn.addEventListener("click", () => uploadInput.click());
-        uploadInput.addEventListener("change", uploadSelected);
+        const filesPicker = makePicker({
+            label: "Upload files",
+            primary: true,
+            multiple: true,
+            directory: false,
+            onChange: uploadSelected,
+        });
+        uploadInput = filesPicker.input;
 
-        const folderBtn = document.createElement("button");
-        folderBtn.type = "button";
-        folderBtn.className = "files-button";
-        folderBtn.textContent = "Upload folder";
-        folderInput = document.createElement("input");
-        folderInput.type = "file";
-        folderInput.multiple = true;
-        folderInput.className = "files-hidden-input";
-        folderInput.setAttribute("webkitdirectory", "");
-        folderInput.setAttribute("directory", "");
-        try {
-            folderInput.webkitdirectory = true;
-            folderInput.directory = true;
-        } catch {
-            // Older browsers only honor the attributes above.
-        }
-        folderBtn.addEventListener("click", () => folderInput.click());
-        folderInput.addEventListener("change", uploadFolderSelected);
+        const folderPicker = makePicker({
+            label: "Upload folder",
+            primary: false,
+            multiple: true,
+            directory: true,
+            onChange: uploadFolderSelected,
+        });
+        folderInput = folderPicker.input;
 
         mkdirInput = document.createElement("input");
         mkdirInput.type = "text";
@@ -894,10 +856,8 @@
         refreshBtn.addEventListener("click", () => loadPath(currentPath));
 
         toolbar.append(
-            uploadBtn,
-            uploadInput,
-            folderBtn,
-            folderInput,
+            filesPicker.wrap,
+            folderPicker.wrap,
             mkdirInput,
             mkdirBtn,
             refreshBtn
@@ -911,59 +871,94 @@
         message.className = "files-message";
 
         panel.append(header, quickLinks, breadcrumb, toolbar, dropZone, listing, message);
-        bindDropTarget(panel);
+        bindDropTarget();
         target.parentNode.insertBefore(panel, target);
         return true;
     }
 
-    function bindDropTarget(element) {
-        let depth = 0;
+    function makePicker({ label, primary, multiple, directory, onChange }) {
+        const wrap = document.createElement("div");
+        wrap.className = "files-picker";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = primary ? "files-button primary" : "files-button";
+        button.textContent = label;
+        button.tabIndex = -1;
+        const input = document.createElement("input");
+        input.type = "file";
+        if (multiple) {
+            input.multiple = true;
+        }
+        if (directory) {
+            input.setAttribute("webkitdirectory", "");
+            input.setAttribute("directory", "");
+            try {
+                input.webkitdirectory = true;
+                input.directory = true;
+            } catch {
+                // Attribute-only browsers still open a folder picker.
+            }
+            input.multiple = true;
+        }
+        input.addEventListener("change", onChange);
+        wrap.append(button, input);
+        return { wrap, input };
+    }
+
+    function overFilesPanel(event) {
+        return Boolean(panel && (event.target === panel || panel.contains(event.target)));
+    }
+
+    function bindDropTarget() {
         const setActive = (on) => {
-            element.classList.toggle("files-drop-active", on);
+            if (panel) {
+                panel.classList.toggle("files-drop-active", on);
+            }
             if (dropZone) {
                 dropZone.classList.toggle("active", on);
             }
         };
-        element.addEventListener("dragenter", (event) => {
-            if (!isFileDrag(event)) {
-                return;
-            }
-            event.preventDefault();
-            depth += 1;
-            setActive(true);
-        });
-        element.addEventListener("dragover", (event) => {
-            if (!isFileDrag(event)) {
-                return;
-            }
-            event.preventDefault();
-            event.dataTransfer.dropEffect = "copy";
-        });
-        element.addEventListener("dragleave", (event) => {
-            if (!isFileDrag(event)) {
-                return;
-            }
-            event.preventDefault();
-            depth = Math.max(0, depth - 1);
-            if (depth === 0) {
-                setActive(false);
-            }
-        });
-        element.addEventListener("drop", (event) => {
-            if (!isFileDrag(event)) {
+        const onDragOver = (event) => {
+            if (!isFileDrag(event) || !overFilesPanel(event)) {
                 return;
             }
             event.preventDefault();
             event.stopPropagation();
-            depth = 0;
+            event.dataTransfer.dropEffect = "copy";
+            setActive(true);
+        };
+        const onDragLeave = (event) => {
+            if (!panel || panel.contains(event.relatedTarget)) {
+                return;
+            }
+            setActive(false);
+        };
+        const onDrop = (event) => {
+            if (!isFileDrag(event) || !overFilesPanel(event)) {
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
             setActive(false);
             const captured = captureDrop(event);
             itemsFromDrop(captured)
-                .then((items) => uploadItems(items))
+                .then((items) => {
+                    if (!items.length) {
+                        showMessage(
+                            "Could not read that folder. Use Upload folder, or drop the folder on the dashed box.",
+                            "warning"
+                        );
+                        return;
+                    }
+                    return uploadItems(items);
+                })
                 .catch((error) => {
                     showMessage(error.message || "Could not read that folder.", "error");
                 });
-        });
+        };
+        document.addEventListener("dragover", onDragOver, true);
+        document.addEventListener("drop", onDrop, true);
+        document.addEventListener("dragleave", onDragLeave, true);
     }
 
     function boot() {

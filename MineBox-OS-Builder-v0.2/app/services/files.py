@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import shutil
 from pathlib import Path
 from typing import Any
@@ -162,6 +163,18 @@ def ensure_directory(path: str) -> dict[str, Any]:
         "entry": _entry_payload(root, target),
         "path": rel,
     }
+
+
+def decode_rel_token(token: str | None) -> str:
+    """Decode the base64url relative-path token from the uploader."""
+    raw = (token or "").strip().replace("-", "+").replace("_", "/")
+    if not raw:
+        return ""
+    raw += "=" * ((4 - len(raw) % 4) % 4)
+    try:
+        return base64.b64decode(raw).decode("utf-8")
+    except (OSError, ValueError, UnicodeDecodeError):
+        return ""
 
 
 def _sanitize_nested_path(*candidates: str | None) -> str:

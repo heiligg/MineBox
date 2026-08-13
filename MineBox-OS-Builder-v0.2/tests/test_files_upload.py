@@ -30,6 +30,12 @@ class FilesUploadTests(unittest.TestCase):
             _sanitize_nested_path("file.txt", "mods/jei/file.txt", "file.txt"),
             "mods/jei/file.txt",
         )
+        from services.files import decode_rel_token
+
+        self.assertEqual(
+            decode_rel_token("bW9kcy9qZWkvZmlsZS50eHQ"),
+            "mods/jei/file.txt",
+        )
 
     def test_rejects_escape(self) -> None:
         from services.files import FilesError, _upload_relative
