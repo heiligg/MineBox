@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -89,12 +89,18 @@ async def upload_file(
     relative_path: str = Form(default=""),
     file: UploadFile = File(...),
     refresh: bool = Query(default=True),
+    nested: str = Query(default=""),
+    x_minebox_relative_path: str | None = Header(
+        default=None,
+        alias="X-MineBox-Relative-Path",
+    ),
 ) -> dict[str, Any]:
     try:
         result = await files.upload_file(
             path,
             file,
             relative_path=relative_path or None,
+            extra_paths=[nested, x_minebox_relative_path or ""],
         )
         if not refresh:
             return {"ok": True, **result}

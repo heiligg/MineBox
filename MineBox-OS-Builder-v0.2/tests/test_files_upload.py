@@ -19,19 +19,24 @@ class FilesUploadTests(unittest.TestCase):
         sys.modules.setdefault("fastapi", type(sys)("fastapi")).UploadFile = object
 
     def test_nested_relative_path(self) -> None:
-        from services.files import _upload_relative
+        from services.files import _sanitize_nested_path, _upload_relative
 
         self.assertEqual(
             _upload_relative("pack.mcmeta", "datapacks/my pack/pack.mcmeta"),
             "datapacks/my pack/pack.mcmeta",
         )
         self.assertEqual(_upload_relative("mod.jar", None), "mod.jar")
+        self.assertEqual(
+            _sanitize_nested_path("file.txt", "mods/jei/file.txt", "file.txt"),
+            "mods/jei/file.txt",
+        )
 
     def test_rejects_escape(self) -> None:
         from services.files import FilesError, _upload_relative
 
+        self.assertEqual(_upload_relative("secret.txt", "../secret.txt"), "secret.txt")
         with self.assertRaises(FilesError):
-            _upload_relative("secret.txt", "../secret.txt")
+            _upload_relative(None, "../secret.txt")
         with self.assertRaises(FilesError):
             _upload_relative("", "mods/")
 

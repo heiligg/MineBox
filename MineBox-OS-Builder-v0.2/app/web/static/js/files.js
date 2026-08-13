@@ -9,6 +9,7 @@
     let breadcrumb;
     let quickLinks;
     let listing;
+    let dropZone;
     let uploadInput;
     let folderInput;
     let mkdirInput;
@@ -163,7 +164,23 @@
                 background: rgba(255, 180, 60, 0.12);
                 color: #ffd27a;
             }
-            .files-hidden-input { display: none; }
+            .files-hidden-input {
+                position: absolute;
+                width: 1px;
+                height: 1px;
+                padding: 0;
+                margin: -1px;
+                overflow: hidden;
+                clip: rect(0, 0, 0, 0);
+                white-space: nowrap;
+                border: 0;
+                opacity: 0;
+            }
+            .files-panel { position: relative; }
+            .files-panel.files-drop-active {
+                outline: 2px dashed rgba(47, 111, 237, 0.8);
+                outline-offset: 6px;
+            }
             .files-drop {
                 margin-top: 14px;
                 padding: 16px;
@@ -446,10 +463,21 @@
         }
     }
 
+    function normalizeRelative(value) {
+        return String(value || "").replace(/\\/g, "/").replace(/^\/+/, "");
+    }
+
     function relativeFor(file) {
-        const nested = String(
-            file.webkitRelativePath || file.relativePath || ""
-        ).replace(/\\/g, "/").replace(/^\/+/, "");
+        if (!file) {
+            return "";
+        }
+        const candidates = [
+            file.webkitRelativePath,
+            file.relativePath,
+        ].map(normalizeRelative);
+        const nested = candidates.find((value) => value.includes("/"))
+            || candidates.find(Boolean)
+            || "";
         if (nested && !nested.endsWith("/")) {
             return nested;
         }
@@ -468,11 +496,88 @@
         return file;
     }
 
-    function collectFiles(fileList) {
-        return [...(fileList || [])].filter((file) => {
-            const name = relativeFor(file);
-            return Boolean(file && name && !name.endsWith("/"));
-        });
+    function filesFromList(fileList) {
+        const out = [];
+        if (!fileList) {
+            return out;
+        }
+        for (let i = 0; i < fileList.length; i += 1) {
+            const file = fileList[i];
+            const relative = relativeFor(file);
+            if (!file || !relative || relative.endsWith("/")) {
+                continue;
+            }
+            out.push({
+                kind: "file",
+                file: attachRelative(file, relative),
+                relative,
+            });
+        }
+        return out;
+    }
+
+    function parentDirs(relative) {
+        const parts = normalizeRelative(relative).split("/").filter(Boolean);
+        parts.pop();
+        const dirs = [];
+        let built = "";
+        for (const part of parts) {
+            built = built ? `${built}/${part}` : part;
+            dirs.push(built);
+        }
+        return dirs;
+    }
+
+    function collectDirs(items) {
+        const dirs = new Set();
+        for (const item of items) {
+            if (item.kind === "dir" && item.relative) {
+                dirs.add(item.relative);
+            }
+            if (item.kind === "file" && item.relative) {
+                parentDirs(item.relative).forEach((dir) => dirs.add(dir));
+            }
+        }
+        return [...dirs].sort(
+            (a, b) => a.split("/").length - b.split("/").length || a.localeCompare(b)
+        );
+    }
+
+    function isFileDrag(event) {
+        const types = event.dataTransfer && event.dataTransfer.types;
+        if (!types) {
+            return false;
+        }
+        return [...types].includes("Files");
+    }
+
+    function captureDrop(event) {
+        const entries = [];
+        const handlePromises = [];
+        const items = event.dataTransfer && event.dataTransfer.items;
+        if (items) {
+            for (let i = 0; i < items.length; i += 1) {
+                const item = items[i];
+                if (typeof item.getAsFileSystemHandle === "function") {
+                    try {
+                        handlePromises.push(item.getAsFileSystemHandle());
+                    } catch {
+                        // HTTP pages may not allow File System Access.
+                    }
+                }
+                if (typeof item.webkitGetAsEntry === "function") {
+                    const entry = item.webkitGetAsEntry();
+                    if (entry) {
+                        entries.push(entry);
+                    }
+                }
+            }
+        }
+        return {
+            entries,
+            handlePromises,
+            files: event.dataTransfer ? event.dataTransfer.files : null,
+        };
     }
 
     function readAllEntries(dirEntry) {
@@ -512,30 +617,49 @@
         return items;
     }
 
-    async function itemsFromDrop(event) {
-        const transfer = event.dataTransfer;
-        const entries = [];
-        const listed = transfer && transfer.items ? [...transfer.items] : [];
-        for (const item of listed) {
-            const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
-            if (entry) {
-                entries.push(entry);
-            }
+    async function walkHandle(handle, prefix) {
+        const relative = prefix ? `${prefix}/${handle.name}` : handle.name;
+        if (handle.kind === "file") {
+            const file = await handle.getFile();
+            return [{ kind: "file", file: attachRelative(file, relative), relative }];
         }
-        if (entries.length) {
+        const items = [{ kind: "dir", relative }];
+        if (typeof handle.values !== "function") {
+            return items;
+        }
+        for await (const child of handle.values()) {
+            items.push(...await walkHandle(child, relative));
+        }
+        return items;
+    }
+
+    async function itemsFromDrop(captured) {
+        if (captured.entries && captured.entries.length) {
             const walked = [];
-            for (const entry of entries) {
+            for (const entry of captured.entries) {
                 walked.push(...await walkEntry(entry, ""));
             }
             if (walked.length) {
                 return walked;
             }
         }
-        return collectFiles(transfer && transfer.files).map((file) => ({
-            kind: "file",
-            file,
-            relative: relativeFor(file),
-        }));
+        if (captured.handlePromises && captured.handlePromises.length) {
+            try {
+                const handles = await Promise.all(captured.handlePromises);
+                const walked = [];
+                for (const handle of handles) {
+                    if (handle) {
+                        walked.push(...await walkHandle(handle, ""));
+                    }
+                }
+                if (walked.length) {
+                    return walked;
+                }
+            } catch {
+                // HTTP pages may reject File System Access handles.
+            }
+        }
+        return filesFromList(captured.files);
     }
 
     async function ensureFolder(relative) {
@@ -557,9 +681,14 @@
         form.append("path", currentPath || "");
         form.append("relative_path", relative);
         form.append("file", file, file.name);
-        const response = await fetch(`${API_BASE}/upload?refresh=false`, {
+        const params = new URLSearchParams({ refresh: "false" });
+        if (relative.length < 800) {
+            params.set("nested", relative);
+        }
+        const response = await fetch(`${API_BASE}/upload?${params}`, {
             method: "POST",
             credentials: "same-origin",
+            headers: { "X-MineBox-Relative-Path": relative },
             body: form,
         });
         const payload = await response.json().catch(() => ({}));
@@ -570,11 +699,7 @@
     }
 
     async function uploadItems(items) {
-        const dirs = [...new Set(
-            items
-                .filter((item) => item.kind === "dir" && item.relative)
-                .map((item) => item.relative)
-        )].sort((a, b) => a.split("/").length - b.split("/").length);
+        const dirs = collectDirs(items);
         const files = items.filter((item) => item.kind === "file" && item.file);
         if (!dirs.length && !files.length) {
             showMessage("Nothing to upload from that folder.", "warning");
@@ -652,13 +777,7 @@
     }
 
     async function uploadFiles(fileList) {
-        await uploadItems(
-            collectFiles(fileList).map((file) => ({
-                kind: "file",
-                file,
-                relative: relativeFor(file),
-            }))
-        );
+        await uploadItems(filesFromList(fileList));
     }
 
     async function uploadSelected() {
@@ -785,35 +904,66 @@
         );
 
         listing = document.createElement("div");
-        const drop = document.createElement("div");
-        drop.className = "files-drop";
-        drop.textContent = "Drop a folder (or files) here — nested files stay in their folders.";
-        ["dragenter", "dragover"].forEach((eventName) => {
-            drop.addEventListener(eventName, (event) => {
-                event.preventDefault();
-                drop.classList.add("active");
-            });
+        dropZone = document.createElement("div");
+        dropZone.className = "files-drop";
+        dropZone.textContent = "Drop a folder anywhere in this Files panel. Nested folders are kept.";
+        message = document.createElement("div");
+        message.className = "files-message";
+
+        panel.append(header, quickLinks, breadcrumb, toolbar, dropZone, listing, message);
+        bindDropTarget(panel);
+        target.parentNode.insertBefore(panel, target);
+        return true;
+    }
+
+    function bindDropTarget(element) {
+        let depth = 0;
+        const setActive = (on) => {
+            element.classList.toggle("files-drop-active", on);
+            if (dropZone) {
+                dropZone.classList.toggle("active", on);
+            }
+        };
+        element.addEventListener("dragenter", (event) => {
+            if (!isFileDrag(event)) {
+                return;
+            }
+            event.preventDefault();
+            depth += 1;
+            setActive(true);
         });
-        ["dragleave", "drop"].forEach((eventName) => {
-            drop.addEventListener(eventName, (event) => {
-                event.preventDefault();
-                drop.classList.remove("active");
-            });
+        element.addEventListener("dragover", (event) => {
+            if (!isFileDrag(event)) {
+                return;
+            }
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "copy";
         });
-        drop.addEventListener("drop", (event) => {
-            const pending = itemsFromDrop(event);
-            pending
+        element.addEventListener("dragleave", (event) => {
+            if (!isFileDrag(event)) {
+                return;
+            }
+            event.preventDefault();
+            depth = Math.max(0, depth - 1);
+            if (depth === 0) {
+                setActive(false);
+            }
+        });
+        element.addEventListener("drop", (event) => {
+            if (!isFileDrag(event)) {
+                return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            depth = 0;
+            setActive(false);
+            const captured = captureDrop(event);
+            itemsFromDrop(captured)
                 .then((items) => uploadItems(items))
                 .catch((error) => {
                     showMessage(error.message || "Could not read that folder.", "error");
                 });
         });
-        message = document.createElement("div");
-        message.className = "files-message";
-
-        panel.append(header, quickLinks, breadcrumb, toolbar, drop, listing, message);
-        target.parentNode.insertBefore(panel, target);
-        return true;
     }
 
     function boot() {

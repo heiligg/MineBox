@@ -164,29 +164,45 @@ def ensure_directory(path: str) -> dict[str, Any]:
     }
 
 
+def _sanitize_nested_path(*candidates: str | None) -> str:
+    """Pick the deepest safe relative path from upload metadata."""
+    ranked: list[str] = []
+    for raw in candidates:
+        text = (raw or "").replace("\\", "/").strip().lstrip("/")
+        if not text or text.endswith("/"):
+            continue
+        parts: list[str] = []
+        valid = True
+        for part in text.split("/"):
+            if not part or part == ".":
+                continue
+            if part == ".." or _is_blocked_name(part):
+                valid = False
+                break
+            parts.append(part)
+        if valid and parts:
+            ranked.append("/".join(parts))
+    if not ranked:
+        raise FilesError("Invalid upload filename.")
+    return max(ranked, key=lambda item: (item.count("/"), len(item)))
+
+
 def _upload_relative(filename: str | None, relative_path: str | None) -> str:
     """Allow nested folder uploads while blocking path escape."""
-    raw = (relative_path or filename or "").replace("\\", "/").strip().lstrip("/")
-    if not raw or raw.endswith("/"):
-        raise FilesError("Invalid upload filename.")
-    parts: list[str] = []
-    for part in raw.split("/"):
-        if not part or part == ".":
-            continue
-        if part == ".." or _is_blocked_name(part):
-            raise FilesError("That path is not allowed.")
-        parts.append(part)
-    if not parts:
-        raise FilesError("Invalid upload filename.")
-    return "/".join(parts)
+    return _sanitize_nested_path(relative_path, filename)
 
 
 async def upload_file(
     directory: str | None,
     upload: UploadFile,
     relative_path: str | None = None,
+    extra_paths: list[str] | None = None,
 ) -> dict[str, Any]:
-    nested = _upload_relative(upload.filename, relative_path)
+    nested = _sanitize_nested_path(
+        relative_path,
+        *(extra_paths or []),
+        upload.filename,
+    )
     relative_dir = _normalize_relative(directory)
     relative = f"{relative_dir}/{nested}" if relative_dir else nested
     _world_guard(relative, mutating=True)
