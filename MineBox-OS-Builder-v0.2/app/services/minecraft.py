@@ -364,6 +364,12 @@ def start_service() -> CommandResult:
             rcon_service.ensure_properties(Path(active.directory))
     except Exception:
         pass
+    try:
+        from services import players as player_service
+
+        player_service.migrate_playerdata_for_online_mode()
+    except Exception:
+        pass
     # Prefer installing Java before systemd start when sudo works. If it fails
     # (common when sudoers lacks ensure-java args), continue — minecraft.service
     # ExecStartPre=+ runs the same ensure as root.
@@ -865,6 +871,14 @@ def save_server_settings(payload: dict[str, object]) -> dict[str, object]:
     # Settings saves must not leave RCON disabled (Forge/vanilla rewrites).
     try:
         rcon.ensure_properties(properties_path.parent)
+    except Exception:
+        pass
+
+    # online-mode changes the player's UUID; copy inventory onto the new id.
+    try:
+        from services import players as player_service
+
+        player_service.migrate_playerdata_for_online_mode()
     except Exception:
         pass
 

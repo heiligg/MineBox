@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +43,115 @@ def _validate_name(name: str) -> str:
 def _offline_uuid(name: str) -> str:
     digest = hashlib.md5(f"OfflinePlayer:{name}".encode("utf-8")).digest()
     return str(uuid.UUID(bytes=digest, version=3))
+
+
+def _copy_player_file(source: Path, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists() and dest.resolve() == source.resolve():
+        return
+    if dest.is_file():
+        backup = dest.with_name(dest.name + ".bak-uuid")
+        if not backup.exists():
+            shutil.copy2(dest, backup)
+    shutil.copy2(source, dest)
+
+
+def _player_names_and_uuids(root: Path) -> dict[str, set[str]]:
+    names: dict[str, set[str]] = {}
+    for entry in _read_json_list(root / "usercache.json"):
+        name = entry.get("name")
+        uid = entry.get("uuid")
+        if not isinstance(name, str) or not isinstance(uid, str):
+            continue
+        clean = name.strip()
+        if not clean:
+            continue
+        names.setdefault(clean, set()).add(uid.strip().lower())
+    usernamecache = root / "usernamecache.json"
+    if usernamecache.is_file():
+        try:
+            data = json.loads(usernamecache.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError, TypeError):
+            data = None
+        if isinstance(data, dict):
+            for uid, name in data.items():
+                if not isinstance(uid, str) or not isinstance(name, str):
+                    continue
+                clean = name.strip()
+                if not clean:
+                    continue
+                names.setdefault(clean, set()).add(uid.strip().lower())
+    for name in list(names):
+        names[name].add(_offline_uuid(name).lower())
+    return names
+
+
+def migrate_playerdata_for_online_mode(root: Path | None = None) -> list[str]:
+    """Copy playerdata when online-mode flips a username onto a new UUID.
+
+    Mojang (online) UUIDs and offline UUIDs are different files. Turning
+    online-mode off otherwise makes the player join as a new empty character.
+    """
+    if root is None:
+        try:
+            root = _active_root()
+        except PlayersError:
+            return []
+    world = root / "world"
+    playerdata = world / "playerdata"
+    if not playerdata.is_dir():
+        return []
+
+    online = True
+    properties_path = root / "server.properties"
+    if properties_path.is_file():
+        try:
+            for raw in properties_path.read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if line.lower().startswith("online-mode="):
+                    online = line.split("=", 1)[1].strip().lower() == "true"
+                    break
+        except OSError:
+            pass
+    moved: list[str] = []
+    sidecars = (
+        (world / "stats", ".json"),
+        (world / "advancements", ".json"),
+    )
+
+    for name, uuids in _player_names_and_uuids(root).items():
+        files = [
+            playerdata / f"{uid}.dat"
+            for uid in uuids
+            if (playerdata / f"{uid}.dat").is_file()
+        ]
+        if not files:
+            continue
+        best = max(files, key=lambda path: path.stat().st_size)
+        offline = _offline_uuid(name).lower()
+        if online:
+            online_files = [path for path in files if path.stem.lower() != offline]
+            target = online_files[0] if online_files else (playerdata / f"{best.stem}.dat")
+            if best.stem.lower() != offline:
+                target = best
+        else:
+            target = playerdata / f"{offline}.dat"
+        if target.is_file() and target.stat().st_size >= best.stat().st_size:
+            continue
+        try:
+            _copy_player_file(best, target)
+            for folder, suffix in sidecars:
+                source_side = folder / f"{best.stem}{suffix}"
+                dest_side = folder / f"{target.stem}{suffix}"
+                if source_side.is_file() and (
+                    not dest_side.is_file()
+                    or dest_side.stat().st_size < source_side.stat().st_size
+                ):
+                    _copy_player_file(source_side, dest_side)
+        except OSError:
+            continue
+        moved.append(f"{name}:{best.stem}->{target.stem}")
+    return moved
 
 
 def _read_json_list(path: Path) -> list[dict[str, Any]]:

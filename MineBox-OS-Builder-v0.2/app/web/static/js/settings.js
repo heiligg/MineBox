@@ -83,7 +83,8 @@
         {
             key: "online-mode",
             label: "Online mode",
-            description: "Verify player accounts with Minecraft authentication servers.",
+            description:
+                "Verify player accounts with Minecraft. Turning this off lets LAN players join without a Microsoft login, but uses a different player UUID — MineBox copies your inventory across when the setting changes.",
             type: "checkbox"
         },
         {
