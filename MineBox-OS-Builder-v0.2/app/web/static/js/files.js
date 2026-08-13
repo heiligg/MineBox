@@ -447,23 +447,137 @@
     }
 
     function relativeFor(file) {
-        const nested = String(file.webkitRelativePath || file.relativePath || "").replace(/\\/g, "/");
+        const nested = String(
+            file.webkitRelativePath || file.relativePath || ""
+        ).replace(/\\/g, "/").replace(/^\/+/, "");
         if (nested && !nested.endsWith("/")) {
             return nested;
         }
         return file.name || "";
     }
 
+    function attachRelative(file, relative) {
+        try {
+            Object.defineProperty(file, "relativePath", {
+                value: relative,
+                configurable: true,
+            });
+        } catch {
+            file.relativePath = relative;
+        }
+        return file;
+    }
+
     function collectFiles(fileList) {
         return [...(fileList || [])].filter((file) => {
             const name = relativeFor(file);
-            return file && file.size >= 0 && name && !name.endsWith("/");
+            return Boolean(file && name && !name.endsWith("/"));
         });
     }
 
-    async function uploadFiles(fileList) {
-        const files = collectFiles(fileList);
-        if (!files.length) {
+    function readAllEntries(dirEntry) {
+        const reader = dirEntry.createReader();
+        return new Promise((resolve, reject) => {
+            const all = [];
+            const pump = () => {
+                reader.readEntries((batch) => {
+                    if (!batch.length) {
+                        resolve(all);
+                        return;
+                    }
+                    all.push(...batch);
+                    pump();
+                }, reject);
+            };
+            pump();
+        });
+    }
+
+    async function walkEntry(entry, prefix) {
+        const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+        if (entry.isFile) {
+            const file = await new Promise((resolve, reject) => {
+                entry.file(resolve, reject);
+            });
+            return [{ kind: "file", file: attachRelative(file, relative), relative }];
+        }
+        if (!entry.isDirectory) {
+            return [];
+        }
+        const children = await readAllEntries(entry);
+        const items = [{ kind: "dir", relative }];
+        for (const child of children) {
+            items.push(...await walkEntry(child, relative));
+        }
+        return items;
+    }
+
+    async function itemsFromDrop(event) {
+        const transfer = event.dataTransfer;
+        const entries = [];
+        const listed = transfer && transfer.items ? [...transfer.items] : [];
+        for (const item of listed) {
+            const entry = item.webkitGetAsEntry && item.webkitGetAsEntry();
+            if (entry) {
+                entries.push(entry);
+            }
+        }
+        if (entries.length) {
+            const walked = [];
+            for (const entry of entries) {
+                walked.push(...await walkEntry(entry, ""));
+            }
+            if (walked.length) {
+                return walked;
+            }
+        }
+        return collectFiles(transfer && transfer.files).map((file) => ({
+            kind: "file",
+            file,
+            relative: relativeFor(file),
+        }));
+    }
+
+    async function ensureFolder(relative) {
+        const path = currentPath ? joinPath(currentPath, relative) : relative;
+        await api(`${API_BASE}/mkdir`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path }),
+        }).catch((error) => {
+            const text = String(error && error.message || "");
+            if (!/already exists/i.test(text)) {
+                throw error;
+            }
+        });
+    }
+
+    async function uploadOne(file, relative) {
+        const form = new FormData();
+        form.append("path", currentPath || "");
+        form.append("relative_path", relative);
+        form.append("file", file, file.name);
+        const response = await fetch(`${API_BASE}/upload?refresh=false`, {
+            method: "POST",
+            credentials: "same-origin",
+            body: form,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            throw new Error(detailFromPayload(payload) || `Failed: ${relative}`);
+        }
+        return payload;
+    }
+
+    async function uploadItems(items) {
+        const dirs = [...new Set(
+            items
+                .filter((item) => item.kind === "dir" && item.relative)
+                .map((item) => item.relative)
+        )].sort((a, b) => a.split("/").length - b.split("/").length);
+        const files = items.filter((item) => item.kind === "file" && item.file);
+        if (!dirs.length && !files.length) {
+            showMessage("Nothing to upload from that folder.", "warning");
             return;
         }
         if (busy) {
@@ -471,48 +585,50 @@
             return;
         }
         busy = true;
-        let lastPayload = null;
         let uploaded = 0;
+        const failures = [];
         try {
-            for (const file of files) {
-                const relative = relativeFor(file);
-                showMessage(`Uploading ${uploaded + 1}/${files.length}: ${relative}`);
-                const form = new FormData();
-                form.append("path", currentPath || "");
-                form.append("relative_path", relative);
-                form.append("file", file, file.name);
-                const response = await fetch(`${API_BASE}/upload`, {
-                    method: "POST",
-                    credentials: "same-origin",
-                    body: form,
-                });
-                const payload = await response.json().catch(() => ({}));
-                if (!response.ok) {
-                    throw new Error(detailFromPayload(payload) || `Failed: ${relative}`);
+            for (const relative of dirs) {
+                try {
+                    await ensureFolder(relative);
+                } catch (error) {
+                    failures.push(`${relative}/ (${error.message || "mkdir failed"})`);
                 }
-                lastPayload = payload;
-                uploaded += 1;
             }
-            showMessage(
-                uploaded === 1
-                    ? `Uploaded ${relativeFor(files[0])}`
-                    : `Uploaded ${uploaded} files`,
-                "success"
-            );
-            if (lastPayload) {
-                renderListing(lastPayload);
+            const queue = [...files];
+            const workers = Math.min(4, queue.length || 1);
+            const runWorker = async () => {
+                while (queue.length) {
+                    const item = queue.shift();
+                    const relative = item.relative || relativeFor(item.file);
+                    showMessage(
+                        `Uploading ${uploaded + failures.length + 1}/${files.length}: ${relative}`
+                    );
+                    try {
+                        await uploadOne(item.file, relative);
+                        uploaded += 1;
+                    } catch (error) {
+                        failures.push(`${relative} (${error.message || "failed"})`);
+                    }
+                }
+            };
+            await Promise.all(Array.from({ length: workers }, runWorker));
+            if (!failures.length) {
+                showMessage(
+                    files.length === 0
+                        ? `Created ${dirs.length} folder${dirs.length === 1 ? "" : "s"}`
+                        : uploaded === 1
+                            ? `Uploaded ${files[0].relative || relativeFor(files[0].file)}`
+                            : `Uploaded ${uploaded} files`,
+                    "success"
+                );
             } else {
-                await loadPath(currentPath);
-            }
-        } catch (error) {
-            showMessage(
-                uploaded
-                    ? `${error.message || "Upload failed."} (${uploaded}/${files.length} finished)`
-                    : (error.message || "Upload failed."),
-                "error"
-            );
-            if (lastPayload) {
-                renderListing(lastPayload);
+                showMessage(
+                    `Uploaded ${uploaded}/${files.length}. Failed: ${failures.slice(0, 4).join("; ")}${
+                        failures.length > 4 ? ` (+${failures.length - 4} more)` : ""
+                    }`,
+                    uploaded ? "warning" : "error"
+                );
             }
         } finally {
             if (uploadInput) {
@@ -523,6 +639,26 @@
             }
             busy = false;
         }
+        const summary = message ? message.textContent : "";
+        const summaryType = message
+            ? [...message.classList].find((name) =>
+                ["success", "warning", "error"].includes(name)
+            ) || ""
+            : "";
+        await loadPath(currentPath);
+        if (summary) {
+            showMessage(summary, summaryType);
+        }
+    }
+
+    async function uploadFiles(fileList) {
+        await uploadItems(
+            collectFiles(fileList).map((file) => ({
+                kind: "file",
+                file,
+                relative: relativeFor(file),
+            }))
+        );
     }
 
     async function uploadSelected() {
@@ -612,6 +748,12 @@
         folderInput.className = "files-hidden-input";
         folderInput.setAttribute("webkitdirectory", "");
         folderInput.setAttribute("directory", "");
+        try {
+            folderInput.webkitdirectory = true;
+            folderInput.directory = true;
+        } catch {
+            // Older browsers only honor the attributes above.
+        }
         folderBtn.addEventListener("click", () => folderInput.click());
         folderInput.addEventListener("change", uploadFolderSelected);
 
@@ -645,7 +787,7 @@
         listing = document.createElement("div");
         const drop = document.createElement("div");
         drop.className = "files-drop";
-        drop.textContent = "Drop files or folders here to upload into this directory.";
+        drop.textContent = "Drop a folder (or files) here — nested files stay in their folders.";
         ["dragenter", "dragover"].forEach((eventName) => {
             drop.addEventListener(eventName, (event) => {
                 event.preventDefault();
@@ -659,10 +801,12 @@
             });
         });
         drop.addEventListener("drop", (event) => {
-            const files = event.dataTransfer && event.dataTransfer.files;
-            if (files && files.length) {
-                uploadFiles(files);
-            }
+            const pending = itemsFromDrop(event);
+            pending
+                .then((items) => uploadItems(items))
+                .catch((error) => {
+                    showMessage(error.message || "Could not read that folder.", "error");
+                });
         });
         message = document.createElement("div");
         message.className = "files-message";

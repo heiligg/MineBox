@@ -16,7 +16,7 @@ router = APIRouter(
 
 
 class MkdirRequest(BaseModel):
-    path: str = Field(..., min_length=1, max_length=512)
+    path: str = Field(..., min_length=1, max_length=2048)
 
 
 def _status_for(message: str) -> int:
@@ -88,6 +88,7 @@ async def upload_file(
     path: str = Form(default=""),
     relative_path: str = Form(default=""),
     file: UploadFile = File(...),
+    refresh: bool = Query(default=True),
 ) -> dict[str, Any]:
     try:
         result = await files.upload_file(
@@ -95,6 +96,8 @@ async def upload_file(
             file,
             relative_path=relative_path or None,
         )
+        if not refresh:
+            return {"ok": True, **result}
         listing = files.list_directory(path)
     except files.FilesError as error:
         raise _http_error(error) from error
