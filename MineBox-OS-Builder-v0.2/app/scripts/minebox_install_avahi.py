@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
@@ -12,42 +13,57 @@ from pathlib import Path
 SOURCE = Path("/opt/minebox/services/avahi/minebox.service")
 TARGET = Path("/etc/avahi/services/minebox.service")
 AVAHI_CONF = Path("/etc/avahi/avahi-daemon.conf")
+HOTSPOT_MARKER = Path("/var/lib/minebox/hotspot_iface")
+ROLES_FILE = Path("/var/lib/minebox/network_roles.json")
 
 
-def _ensure_avahi_iface_policy() -> None:
-    """Keep mDNS off the SoftAP radio.
+def _hotspot_iface() -> str:
+    try:
+        if HOTSPOT_MARKER.is_file():
+            name = HOTSPOT_MARKER.read_text(encoding="utf-8").strip()
+            if name:
+                return name
+    except OSError:
+        pass
+    try:
+        data = json.loads(ROLES_FILE.read_text(encoding="utf-8"))
+        hotspot = data.get("hotspot") if isinstance(data, dict) else None
+        if hotspot:
+            return str(hotspot)
+    except (OSError, json.JSONDecodeError, TypeError):
+        pass
+    return "wlan0"
 
-    Windows treats .local as mDNS-only. On MineBox-Setup, multicast DNS is
-    unreliable, and advertising the LAN IP (wlan1) to hotspot clients makes
-    minebox.local resolve to an unreachable address. LAN clients still get
-    minebox.local via wlan1/eth0.
-    """
+
+def _ensure_avahi_conf(hotspot_iface: str) -> None:
+    """Advertise minebox.local on home LAN/Ethernet, not the SoftAP radio."""
     if not AVAHI_CONF.is_file():
         return
     text = AVAHI_CONF.read_text(encoding="utf-8")
     updated = text
-    if re.search(r"^#?deny-interfaces=", updated, flags=re.M):
-        updated = re.sub(
-            r"^#?deny-interfaces=.*$",
-            "deny-interfaces=wlan0",
-            updated,
-            count=1,
-            flags=re.M,
-        )
-    else:
-        updated = updated.replace(
-            "[server]\n",
-            "[server]\ndeny-interfaces=wlan0\n",
-            1,
-        )
-    if updated != text:
-        AVAHI_CONF.write_text(updated, encoding="utf-8")
-        subprocess.run(
-            ["systemctl", "try-reload-or-restart", "avahi-daemon.service"],
-            check=False,
-            timeout=30,
-        )
-        print(f"updated {AVAHI_CONF} deny-interfaces=wlan0")
+
+    def _set(key: str, value: str) -> None:
+        nonlocal updated
+        pattern = rf"^#?{re.escape(key)}=.*$"
+        line = f"{key}={value}"
+        if re.search(pattern, updated, flags=re.M):
+            updated = re.sub(pattern, line, updated, count=1, flags=re.M)
+        elif "[server]\n" in updated:
+            updated = updated.replace("[server]\n", f"[server]\n{line}\n", 1)
+
+    _set("use-ipv4", "yes")
+    _set("use-ipv6", "no")
+    _set("deny-interfaces", hotspot_iface)
+
+    if updated == text:
+        return
+    AVAHI_CONF.write_text(updated, encoding="utf-8")
+    subprocess.run(
+        ["systemctl", "try-reload-or-restart", "avahi-daemon.service"],
+        check=False,
+        timeout=30,
+    )
+    print(f"updated {AVAHI_CONF} deny-interfaces={hotspot_iface}")
 
 
 def main() -> int:
@@ -69,7 +85,7 @@ def main() -> int:
     TARGET.parent.mkdir(parents=True, exist_ok=True)
     TARGET.write_text(body, encoding="utf-8")
     print(f"installed {TARGET} (minecraft port {args.port})")
-    _ensure_avahi_iface_policy()
+    _ensure_avahi_conf(_hotspot_iface())
     return 0
 
 

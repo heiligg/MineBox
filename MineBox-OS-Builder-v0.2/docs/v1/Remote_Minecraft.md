@@ -10,7 +10,7 @@ Authenticated admin sets `expose_minecraft=true` via `/api/v1/remote-access/expo
 
 ## How friends connect
 
-- **Local players:** SoftAP `192.168.4.1:25565` or LAN IP — no Tailscale required
+- **Local players:** `minebox.local` or the home LAN IP on port `25565`. SoftAP is `192.168.4.1:25565`. No Tailscale required.
 - **Remote friends:** Join the same Tailscale tailnet (or an owner-approved share) and connect to the MineBox Tailscale IPv4/hostname shown only to authenticated admins — port **25565**
 - No UPnP, no router port-forward automation, no public WAN relay
 

@@ -139,8 +139,15 @@ class CaptiveHandler(BaseHTTPRequestHandler):
         self.send_header("Connection", "close")
         self.end_headers()
 
+    def _request_host(self) -> str:
+        host = (self.headers.get("Host") or "").split(":", 1)[0].strip()
+        if host:
+            return host
+        return DASHBOARD_HOST
+
     def _landing_page(self) -> None:
-        http_url = f"http://{DASHBOARD_HOST}/"
+        public_host = self._request_host()
+        http_url = f"http://{public_host}/"
         https_url = public_dashboard_url()
         note = ""
         if not dashboard_reachable():
@@ -169,9 +176,8 @@ class CaptiveHandler(BaseHTTPRequestHandler):
             "<p>Waiting for the dashboard…</p>"
             "<p><a href='/'>Retry</a></p>"
             f"{https_hint}{note}"
-            "<p>On MineBox-Setup use <code>http://192.168.4.1</code> "
-            "(or <code>http://minebox.setup</code>) — not "
-            "<code>minebox.local</code>.</p>"
+            "<p>On home Wi‑Fi open <code>http://minebox.local</code>. "
+            "On MineBox-Setup use <code>http://192.168.4.1</code>.</p>"
             "<p>Use the Wi‑Fi password configured for this appliance "
             "(rotated during first-boot setup).</p>"
             "</body></html>"
@@ -202,9 +208,11 @@ class CaptiveHandler(BaseHTTPRequestHandler):
                     "accept-encoding",
                 }
             }
-            # Present the public hotspot host to the app (cookies / redirects).
-            headers["Host"] = DASHBOARD_HOST
-            headers["X-Forwarded-Host"] = DASHBOARD_HOST
+            # Keep the browser host (minebox.local or 192.168.4.1) so LAN
+            # clients are not redirected onto the unreachable hotspot IP.
+            public_host = self._request_host()
+            headers["Host"] = public_host
+            headers["X-Forwarded-Host"] = public_host
             headers["X-Forwarded-Proto"] = "http"
             headers["X-Forwarded-Port"] = "80"
             headers["Connection"] = "close"
@@ -225,15 +233,23 @@ class CaptiveHandler(BaseHTTPRequestHandler):
                     value = (
                         value.replace(
                             f"https://{DASHBOARD_HOST}:{DASHBOARD_PORT}",
-                            f"http://{DASHBOARD_HOST}",
+                            f"http://{public_host}",
                         )
                         .replace(
                             f"http://{DASHBOARD_HOST}:{DASHBOARD_PORT}",
-                            f"http://{DASHBOARD_HOST}",
+                            f"http://{public_host}",
                         )
-                        .replace("https://127.0.0.1:8081", f"http://{DASHBOARD_HOST}")
-                        .replace("http://127.0.0.1:8081", f"http://{DASHBOARD_HOST}")
-                        .replace("http://127.0.0.1:8080", f"http://{DASHBOARD_HOST}")
+                        .replace(
+                            f"https://{public_host}:{DASHBOARD_PORT}",
+                            f"http://{public_host}",
+                        )
+                        .replace(
+                            f"http://{public_host}:{DASHBOARD_PORT}",
+                            f"http://{public_host}",
+                        )
+                        .replace("https://127.0.0.1:8081", f"http://{public_host}")
+                        .replace("http://127.0.0.1:8081", f"http://{public_host}")
+                        .replace("http://127.0.0.1:8080", f"http://{public_host}")
                     )
                 self.send_header(key, value)
             self.send_header("Content-Length", str(len(payload)))
@@ -247,7 +263,7 @@ class CaptiveHandler(BaseHTTPRequestHandler):
         except (OSError, http.client.HTTPException, ValueError):
             _REACHABLE_CACHE["ok"] = False
             _REACHABLE_CACHE["checked"] = time.monotonic()
-            target = f"http://{DASHBOARD_HOST}/"
+            target = f"http://{self._request_host()}/"
             body = (
                 "<!doctype html><html><body style='font-family:sans-serif;padding:24px'>"
                 "<h1>MineBox</h1>"

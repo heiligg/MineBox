@@ -25,8 +25,9 @@ MineBox uses a dual-radio SoftAP design:
 | TCP 80 | Captive helper / dashboard front-door |
 | TCP 8080 | FastAPI dashboard |
 | TCP 25565 | Minecraft |
+| UDP 5353 | mDNS (`minebox.local` on home LAN) |
 
-RCON (`25575`) and SSH are **not** exposed on the WAN/default policy.
+On **home Wi‑Fi**, open `http://minebox.local` and join Minecraft as `minebox.local` (or the LAN IP). SSH is allowed on hotspot and home LAN; RCON (`25575`) stays closed. WAN still default-drops dashboard/SSH.
 
 ## Key paths
 

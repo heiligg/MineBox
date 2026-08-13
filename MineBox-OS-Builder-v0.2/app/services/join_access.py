@@ -54,11 +54,20 @@ def _read_port_from_properties() -> tuple[int, str | None]:
 
 def lan_ip() -> str | None:
     status = network.status()
-    return (
-        status.get("ip_address")
-        or (status.get("ethernet") or {}).get("ip_address")
-        or (status.get("wifi") or {}).get("ip_address")
-    )
+    candidates = [
+        status.get("ip_address"),
+        (status.get("ethernet") or {}).get("ip_address"),
+        (status.get("wifi") or {}).get("ip_address"),
+    ]
+    for address in candidates:
+        text = str(address or "").strip()
+        if not text:
+            continue
+        # Never advertise the SoftAP address to home-LAN players.
+        if text.startswith("192.168.4."):
+            continue
+        return text
+    return None
 
 
 def _format_address(host: str, port: int) -> str:
@@ -367,8 +376,11 @@ def status() -> dict[str, Any]:
         "internet_mapped": mapped,
         "upnp": mapping,
         "notes": [
-            f"On the same home network, open Minecraft Multiplayer and join {lan_address}.",
-            "The .local name only works on your LAN or MineBox hotspot — not on the internet.",
+            f"On the same home Wi‑Fi, open the dashboard at http://{host}/ "
+            f"and join Minecraft with {lan_address}"
+            + (f" or {lan_ip_address}" if lan_ip_address else "")
+            + ".",
+            "If minebox.local does not resolve, use the LAN IP shown above.",
             (
                 f"Friends on the internet can join {internet_address}."
                 if mapped and internet_address

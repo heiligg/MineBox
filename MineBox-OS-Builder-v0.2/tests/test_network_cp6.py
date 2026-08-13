@@ -109,6 +109,7 @@ class NetworkCp6Tests(unittest.TestCase):
         self.assertTrue(firewall.validate_nftables_text(with_sharing)["ok"])
         self.assertTrue(firewall.validate_nftables_text(without)["ok"])
         self.assertIn("25575", with_sharing)
+        self.assertIn("udp dport 5353 accept", with_sharing)
         self.assertIn("policy drop", with_sharing)
         self.assertIn('iifname "lo" accept', with_sharing)
 
@@ -175,6 +176,8 @@ class NetworkCp6Tests(unittest.TestCase):
         # Sharing configured may be true, but active requires uplink.
         self.assertFalse(policy["internet_sharing_active"])
         self.assertNotIn("masquerade", policy["ruleset"])
+        self.assertIn("udp dport 5353 accept", policy["ruleset"])
+        self.assertIn("tcp dport 22 accept", policy["ruleset"])
 
     def test_docs_exist(self) -> None:
         docs = ROOT / "docs" / "v1"

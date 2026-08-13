@@ -89,6 +89,10 @@ table inet minebox_filter {{
         # ICMP (limited) for local diagnostics
         ip protocol icmp icmp type echo-request limit rate 5/second accept
 
+        # mDNS so home-LAN clients can resolve minebox.local
+        ip protocol igmp accept
+        udp dport 5353 accept
+
         # Hotspot: DHCP, DNS, dashboard, Minecraft (and optional SSH)
         iifname "{hs}" udp dport {{ 53, 67 }} accept
         iifname "{hs}" tcp dport {{ 53, 80, {dash}, {mc} }} accept
@@ -175,12 +179,13 @@ def internet_sharing_enabled() -> bool:
 
 def build_policy_for_roles(hotspot_iface: str | None, *, has_uplink: bool) -> dict[str, Any]:
     sharing = internet_sharing_enabled() and has_uplink and bool(hotspot_iface)
-    # SoftAP bring-up: allow SSH on the hotspot iface only (still dropped from WAN/LAN).
+    # SoftAP bring-up SSH stays on hotspot. Home LAN also allows SSH so the
+    # appliance can be administered without joining MineBox-Setup.
     text = generate_nftables(
         hotspot_iface=hotspot_iface or "wlan0",
         internet_sharing=sharing,
         allow_ssh_on_hotspot=True,
-        allow_ssh_on_lan=False,
+        allow_ssh_on_lan=True,
     )
     check = validate_nftables_text(text)
     return {

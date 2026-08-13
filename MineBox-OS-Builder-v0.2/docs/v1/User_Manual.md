@@ -34,7 +34,7 @@ The display shows **Backend unavailable**. Wait for reconnect, or use the curses
 
 ### Web dashboard
 
-On the same network: `http://<minebox-ip>:8080` (or SoftAP `http://192.168.4.1`). Full file/console/restore tools live there.
+On home Wi‑Fi: `http://minebox.local` (or the LAN IP). On the setup hotspot: `http://192.168.4.1`. Full file/console/restore tools live there.
 
 ### Encoder note
 

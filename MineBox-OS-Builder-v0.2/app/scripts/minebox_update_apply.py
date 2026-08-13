@@ -862,6 +862,8 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
                 "/usr/local/sbin/minebox-install-avahi",
             ]
         )
+        # Advertise minebox.local on home LAN (HTTP :80 + Minecraft).
+        run(["/usr/bin/python3", str(avahi_script)], timeout=30)
 
     java_script = target / "scripts" / "minebox_ensure_java.py"
     if java_script.is_file():
@@ -1026,6 +1028,13 @@ def install_minecraft_permissions(target: Path, dev: bool) -> None:
             text=True,
             timeout=60,
             env={**os.environ, "PYTHONPATH": str(target)},
+        )
+        subprocess.run(
+            ["nft", "-f", "/etc/nftables.conf"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
 
 
