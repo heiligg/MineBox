@@ -22,11 +22,11 @@
 
 | Encoder pad | MineBox / Pi | Notes |
 |-------------|--------------|-------|
-| VIN | 3.3 V | Do not use 5 V on a 3.3 V-only MineBox rail |
-| GND | GND | |
-| SDA | I²C1 SDA (BCM 2 / phys 3) | Bus `i2c_bus = 1` |
-| SCL | I²C1 SCL (BCM 3 / phys 5) | |
-| INT | BCM **24** (configurable) | Active-low interrupt; optional but recommended |
+| VIN | 3.3 V (header pin 1) | Do not use 5 V on a 3.3 V-only MineBox rail |
+| GND | GND (header pin 9) | Screen already uses header pin 6 |
+| SDA | I²C1 SDA (BCM **2** / header pin 3 / J1-7) | Bus `i2c_bus = 1` |
+| SCL | I²C1 SCL (BCM **3** / header pin 5 / J1-6) | Clock is J1-6, data is J1-7 — not SDA-then-SCL on the JST |
+| INT | BCM **22** / header pin 15 / J1-8 | Active-low interrupt; optional but recommended |
 | 3Vo | — | Do not power the Pi from 3Vo |
 
 STEMMA QT cables are supported when the panel exposes a QT connector.
@@ -61,7 +61,7 @@ type = "adafruit_seesaw"
 status = "OK"
 i2c_bus = 1
 address = 0x36
-interrupt_gpio = 24
+interrupt_gpio = 22
 rotation_step = 1
 debounce_ms = 15
 long_press_ms = 700

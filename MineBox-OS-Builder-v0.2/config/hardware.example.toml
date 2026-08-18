@@ -4,15 +4,16 @@
 # Hardware Revision D — Adafruit Seesaw rotary encoder (Product 5880) is primary
 # navigation. Dual buttons remain as secondary controls (back/home, context/power).
 #
-# Requires dtparam=i2c_arm=on (I²C1). Button BCM assignments are PROVISIONAL /
-# UNVERIFIED_AGAINST_PCB until the PCB is verified.
+# Software uses BCM GPIO numbers, never 40-pin header numbers.
+# Power pins (3.3 V / 5 V / GND) are not GPIOs.
+# Requires dtparam=i2c_arm=on (I²C1).
 
 [profile]
 name = "raspberry_pi5"
-verification = "UNVERIFIED_AGAINST_PCB"
+verification = "SOURCE_VERIFIED"
 
 [buttons]
-# Active-low with internal pull-up (press shorts to GND).
+# Active-low (pressed = 0). 10 k pull-up on the PCB; keep software pull-up too.
 active_level = "active_low"
 pull = "up"
 debounce_ms = 40
@@ -21,31 +22,40 @@ lockout_ms = 150
 poll_ms = 5
 
 [buttons.left]
-gpio_bcm = 23
-physical_pin = 16
-short_action = "back"
-long_action = "home"
-
-[buttons.right]
+# SW1 — J1-4 / header pin 11
 gpio_bcm = 17
 physical_pin = 11
+short_action = "back"
+long_action = "home"
+verification = "SOURCE_VERIFIED"
+
+[buttons.right]
+# SW2 — J1-5 / header pin 13
+gpio_bcm = 27
+physical_pin = 13
 short_action = "context"
 long_action = "power"
+verification = "SOURCE_VERIFIED"
 
 [encoder]
 # Adafruit Seesaw Rotary Encoder — Product 5880 (I²C).
+# SDA = J1-7 / header pin 3 / GPIO2
+# SCL = J1-6 / header pin 5 / GPIO3
+# INT = J1-8 / header pin 15 / GPIO22 (optional, open-drain)
+# Do not assume SDA-then-SCL order on the JST.
 enabled = true
 type = "adafruit_seesaw"
 status = "OK"
 i2c_bus = 1
 address = 0x36
-interrupt_gpio = 24
+interrupt_gpio = 22
 rotation_step = 1
 debounce_ms = 15
 long_press_ms = 700
 
 [leds]
-# Illuminated button LEDs — NOT_CONFIGURED until PCB pinout is verified.
+# Illuminated button LEDs — NOT_CONFIGURED until LED GPIO pinout is verified.
+# 5 V for LEDs is header pin 4 (not a GPIO). Header pin 2 stays with the screen.
 left_status = "NOT_CONFIGURED"
 right_status = "NOT_CONFIGURED"
 # left_gpio_bcm = unset

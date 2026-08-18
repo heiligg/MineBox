@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """MineBox dual pushbutton hardware test.
 
-Left:  BCM GPIO23 (active low, internal pull-up) — physical pin 16
-Right: BCM GPIO17 (active low, internal pull-up) — physical pin 11
+Left:  BCM GPIO17 (active low) — header pin 11
+Right: BCM GPIO27 (active low) — header pin 13
 
 Wiring per button (active-low):
   COM -> GND (e.g. physical pin 14)
@@ -22,8 +22,8 @@ import time
 
 from gpiozero import Button
 
-LEFT_GPIO = 23
-RIGHT_GPIO = 17
+LEFT_GPIO = 17
+RIGHT_GPIO = 27
 DEBOUNCE_S = 0.04
 LOCKOUT_S = 0.25
 POLL_S = 0.002
@@ -77,10 +77,10 @@ def run_test(left_gpio: int, right_gpio: int, *, right_pull_up: bool) -> int:
     right = DebouncedButton(right_gpio, "Right", pull_up=right_pull_up)
 
     print("MineBox dual button test")
-    print(f"  Left  BCM GPIO{left_gpio}  pull_up=True   (phys pin 16 if GPIO23)")
+    print(f"  Left  BCM GPIO{left_gpio}  pull_up=True   (header pin 11 if GPIO17)")
     print(
         f"  Right BCM GPIO{right_gpio}  pull_up={right_pull_up}  "
-        f"(phys pin 11 if GPIO17)"
+        f"(header pin 13 if GPIO27)"
     )
     print(f"  debounce={DEBOUNCE_S*1000:.0f}ms  lockout={LOCKOUT_S*1000:.0f}ms")
     print(
@@ -91,7 +91,7 @@ def run_test(left_gpio: int, right_gpio: int, *, right_pull_up: bool) -> int:
         "  Idle right: "
         + ("PRESSED/shorted" if right.stable_pressed else "released (OK)")
     )
-    print("  Hardware check: jumper pin 11 to pin 14 (GND) — should print Right pressed.")
+    print("  Hardware check: jumper header pin 13 to GND (pin 9) — should print Right pressed.")
     print("  Ctrl+C to exit.")
     print()
 

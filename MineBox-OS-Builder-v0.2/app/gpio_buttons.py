@@ -77,8 +77,8 @@ class ButtonController:
         self._thread: threading.Thread | None = None
         self.available = False
         self._source = "api"
-        self.left_gpio = 23
-        self.right_gpio = 17
+        self.left_gpio = 17
+        self.right_gpio = 27
 
     def start(self) -> bool:
         if self._thread is not None:
@@ -236,5 +236,5 @@ def pop_button_key() -> int | None:
     return _controller.pop_key()
 
 
-LEFT_GPIO = 23
-RIGHT_GPIO = 17
+LEFT_GPIO = 17
+RIGHT_GPIO = 27

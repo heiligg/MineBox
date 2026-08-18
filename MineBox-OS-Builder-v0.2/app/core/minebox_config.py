@@ -253,9 +253,9 @@ def parse_hardware(data: Mapping[str, Any], *, source: str = "") -> HardwareConf
     lockout_ms = _optional_int(buttons, "lockout_ms", 150, min_v=0, max_v=2000)
     poll_ms = _optional_int(buttons, "poll_ms", 5, min_v=1, max_v=100)
 
-    # Two-button primary nav while encoder is disabled / not installed.
-    left_defaults = {"gpio_bcm": 23, "physical_pin": 16, "short_action": "prev", "long_action": "back"}
-    right_defaults = {"gpio_bcm": 17, "physical_pin": 11, "short_action": "next", "long_action": "select"}
+    # BCM GPIO numbers (not header pins). SW1=GPIO17, SW2=GPIO27.
+    left_defaults = {"gpio_bcm": 17, "physical_pin": 11, "short_action": "prev", "long_action": "back"}
+    right_defaults = {"gpio_bcm": 27, "physical_pin": 13, "short_action": "next", "long_action": "select"}
 
     left_btn = _parse_button(left or left_defaults, "left", left_defaults)
     right_btn = _parse_button(right or right_defaults, "right", right_defaults)

@@ -25,7 +25,7 @@ The installer configures all required ownership, shared-group access, default AC
 - Hold Left (~0.45s): Back / Exit
 - Hold Right (~0.45s): Confirm / Select (inside menus only — not used to open the menu)
 
-Pins: Left BCM23 (pin 16), Right BCM17 (pin 11), GND pin 14.
+Pins: Left GPIO17 (header pin 11), Right GPIO27 (header pin 13), GND header pin 9.
 
 ## Development keyboard mapping
 

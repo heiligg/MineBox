@@ -1,8 +1,8 @@
 """Raspberry Pi 5 hardware profile.
 
-Button BCM numbers come only from HardwareConfig (provisional until PCB verified).
-Hardware Rev D: Adafruit Seesaw encoder (Product 5880) over I²C.
-LED / fan GPIO remain NOT_CONFIGURED until PCB pinout is verified.
+Button BCM numbers come only from HardwareConfig (GPIO17 left, GPIO27 right).
+Hardware Rev D: Adafruit Seesaw encoder (Product 5880) over I²C1 address 0x36.
+LED / fan GPIO remain NOT_CONFIGURED. Power pins are not GPIOs.
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ class RaspberryPi5Hardware:
             self._right_btn = Button(self.config.right_button.gpio_bcm, **button_kwargs)
             self._gpio_available = True
             LOGGER.info(
-                "Pi5 buttons claimed from config (UNVERIFIED_AGAINST_PCB): "
+                "Pi5 buttons claimed from config: "
                 "left BCM%s right BCM%s active_level=%s pull=%s",
                 self.config.left_button.gpio_bcm,
                 self.config.right_button.gpio_bcm,
@@ -279,8 +279,9 @@ class RaspberryPi5Hardware:
         if self._gpio_error:
             messages.append(self._gpio_error)
         messages.append(
-            "Button GPIOs are provisional (UNVERIFIED_AGAINST_PCB) until "
-            "docs/v1/Hardware_Pinout.md is source-verified."
+            f"Button GPIOs: left BCM{self.config.left_button.gpio_bcm} "
+            f"right BCM{self.config.right_button.gpio_bcm} "
+            f"({self.config.verification})."
         )
         if self.config.encoder_enabled and not self.encoder_available():
             messages.append(

@@ -748,9 +748,9 @@ def ensure_i2c_enabled() -> None:
     )
 
 
-def ensure_encoder_rev_d_config() -> None:
-    """Enable Seesaw encoder + Rev D secondary button actions when configured."""
-    path = Path("/etc/minebox/hardware.toml")
+def ensure_encoder_rev_d_config(path: Path | None = None) -> None:
+    """Enable Seesaw encoder, Rev D button actions, and verified BCM GPIOs."""
+    path = path or Path("/etc/minebox/hardware.toml")
     if not path.is_file():
         return
     try:
@@ -775,26 +775,66 @@ def ensure_encoder_rev_d_config() -> None:
                 out.append("enabled = true")
                 continue
             if stripped.startswith("status"):
+                if 'status = "OK"' not in stripped:
+                    changed = True
                 out.append('status = "OK"')
-                changed = True
+                continue
+            if stripped.startswith("i2c_bus"):
+                if stripped.split("=", 1)[-1].strip() != "1":
+                    changed = True
+                out.append("i2c_bus = 1")
+                continue
+            if stripped.startswith("address"):
+                if "0x36" not in stripped.lower():
+                    changed = True
+                out.append("address = 0x36")
+                continue
+            if stripped.startswith("interrupt_gpio"):
+                if stripped.split("=", 1)[-1].strip() != "22":
+                    changed = True
+                out.append("interrupt_gpio = 22")
                 continue
         if section == "[buttons.left]":
+            if stripped.startswith("gpio_bcm"):
+                if stripped.split("=", 1)[-1].strip() != "17":
+                    changed = True
+                out.append("gpio_bcm = 17")
+                continue
+            if stripped.startswith("physical_pin"):
+                if stripped.split("=", 1)[-1].strip() != "11":
+                    changed = True
+                out.append("physical_pin = 11")
+                continue
             if stripped.startswith("short_action"):
+                if 'short_action = "back"' not in stripped:
+                    changed = True
                 out.append('short_action = "back"')
-                changed = True
                 continue
             if stripped.startswith("long_action"):
+                if 'long_action = "home"' not in stripped:
+                    changed = True
                 out.append('long_action = "home"')
-                changed = True
                 continue
         if section == "[buttons.right]":
+            if stripped.startswith("gpio_bcm"):
+                if stripped.split("=", 1)[-1].strip() != "27":
+                    changed = True
+                out.append("gpio_bcm = 27")
+                continue
+            if stripped.startswith("physical_pin"):
+                if stripped.split("=", 1)[-1].strip() != "13":
+                    changed = True
+                out.append("physical_pin = 13")
+                continue
             if stripped.startswith("short_action"):
+                if 'short_action = "context"' not in stripped:
+                    changed = True
                 out.append('short_action = "context"')
-                changed = True
                 continue
             if stripped.startswith("long_action"):
+                if 'long_action = "power"' not in stripped:
+                    changed = True
                 out.append('long_action = "power"')
-                changed = True
                 continue
         out.append(line)
 
@@ -803,7 +843,7 @@ def ensure_encoder_rev_d_config() -> None:
     try:
         path.write_text("\n".join(out) + "\n", encoding="utf-8")
         print(
-            f"Updated {path}: encoder enabled (Rev D), secondary button actions set.",
+            f"Updated {path}: encoder I2C1 0x36, buttons GPIO17/27, INT GPIO22.",
             flush=True,
         )
     except OSError as exc:

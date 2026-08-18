@@ -57,13 +57,13 @@ Print this page. Mark Pass / Fail / Blocked / N/A. Record observations.
 - Pass / Fail | Severity: **S2**
 
 ### 6. Left button
-- **Prerequisites:** BCM23 (or documented) wired; HAL not mock-only
+- **Prerequisites:** GPIO17 (header pin 11) wired; HAL not mock-only
 - **Steps:** Short press / hold per Display UI flow
 - **Expected:** Back / hold actions match docs
 - Pass / Fail | Severity: **S1**
 
 ### 7. Right button
-- **Prerequisites:** BCM17 (or documented)
+- **Prerequisites:** GPIO27 (header pin 13)
 - **Steps:** Short / hold
 - **Expected:** Select / alternate actions match docs
 - Pass / Fail | Severity: **S1**

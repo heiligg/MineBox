@@ -97,7 +97,7 @@ Companion docs: [Repository_Audit.md](Repository_Audit.md) · [Architecture.md](
 - [x] Invalid config fails startup with clear message.
 - [x] Mock HAL usable in unit tests on Windows/Linux desktop.
 - [x] Minecraft state machine documented and reflected in API status.
-- [x] Pi GPIO for left/right buttons loaded from config (defaults: BCM23 / BCM17 provisional).
+- [x] Pi GPIO for left/right buttons loaded from config (defaults: GPIO17 / GPIO27).
 - [x] Encoder/LED/fan pins: `NOT_CONFIGURED` (not invented).
 - [x] `check-project.sh` matches supported hotspot configuration.
 

@@ -457,8 +457,9 @@ def write_manifest(test_summary: dict, security: dict, artifacts: dict, verify: 
         "official_server_providers": ["paper", "vanilla"],
         "experimental_providers": ["forge", "fabric"],
         "hardware_profile_status": {
-            "buttons": "UNVERIFIED_AGAINST_PCB",
-            "encoder": "NOT_CONFIGURED",
+            "buttons": "SOURCE_VERIFIED",
+            "encoder": "I2C1_0x36",
+            "encoder_int": "GPIO22",
             "leds": "NOT_CONFIGURED",
             "fan_gpio": "NOT_CONFIGURED",
             "cm5": "stub",

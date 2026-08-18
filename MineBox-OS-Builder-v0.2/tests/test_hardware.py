@@ -82,7 +82,7 @@ class HardwareTests(unittest.TestCase):
         # On Windows/dev hosts gpiozero may be missing — must not crash.
         health = hw.health()
         self.assertTrue(health.ok)
-        self.assertEqual(health.gpio_verification, "UNVERIFIED_AGAINST_PCB")
+        self.assertEqual(health.gpio_verification, "SOURCE_VERIFIED")
         self.assertEqual(hw.set_left_led(True), FeatureStatus.NOT_CONFIGURED)
         hw.close()
 

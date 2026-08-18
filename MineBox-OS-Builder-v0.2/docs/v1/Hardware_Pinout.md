@@ -1,8 +1,8 @@
 # MineBox Hardware Pinout — Prototype v1.0 (Hardware Rev D)
 
-**Status:** Partial — button GPIOs provisional; encoder is I²C Seesaw (Product 5880)  
-**Date:** 2026-08-05  
-**Rule:** Do not invent quadrature encoder GPIO, LED, or fan GPIO assignments.
+**Status:** Buttons, encoder I²C, and INT verified from the panel JST mapping  
+**Date:** 2026-08-17  
+**Rule:** Software uses **BCM GPIO numbers**, not 40-pin header numbers. Power pins are not GPIOs. Do not invent LED or fan GPIO assignments.
 
 ---
 
@@ -12,24 +12,28 @@
 |-----|---------|
 | `UNVERIFIED_AGAINST_PCB` | Present in software/config only; electrical pinout not yet in repo |
 | `NOT_CONFIGURED` | Feature exists in HAL but pins intentionally unset |
-| `SOURCE_VERIFIED` | Confirmed against PCB / KiCad in this repository (none yet) |
+| `SOURCE_VERIFIED` | Confirmed against the assembled panel / J1 mapping |
 | `PRODUCT_DATASHEET` | Taken from Adafruit Product 5880 documentation |
 
 ---
 
-## Buttons (provisional)
+## Buttons
 
-| Signal | Raspberry Pi BCM | Physical pin | Voltage | Direction | Pull | Active | Source | Verification |
-|--------|------------------|--------------|---------|-----------|------|--------|--------|--------------|
-| Left button | 23 | 16 | 3.3 V logic | Input | Internal pull-up | Active-low (to GND) | `config/hardware.example.toml` | **UNVERIFIED_AGAINST_PCB** |
-| Right button | 17 | 11 | 3.3 V logic | Input | Internal pull-up | Active-low (to GND) | same | **UNVERIFIED_AGAINST_PCB** |
-| GND | — | 14 (or any GND) | 0 V | — | — | — | — | UNVERIFIED_AGAINST_PCB |
+Active-low (pressed = 0). 10 k pull-up on the PCB.
+
+| Function | J1 hole | Header pin | BCM GPIO | Notes | Verification |
+|----------|---------|------------|----------|-------|--------------|
+| Left button (SW1) | 4 | 11 | **GPIO17** | Active low | SOURCE_VERIFIED |
+| Right button (SW2) | 5 | 13 | **GPIO27** | Active low | SOURCE_VERIFIED |
 
 Centralized config: `/etc/minebox/hardware.toml` (example: `config/hardware.example.toml`).
 
-Wire each switch between the BCM pin and **GND** (active-low). Do not connect button inputs to 5 V.
+```
+BTN_LEFT  = 17    # GPIO17, active low
+BTN_RIGHT = 27    # GPIO27, active low
+```
 
-**Current software (encoder disabled):**
+**Current software (encoder disabled / missing):**
 
 | Input | Short press | Long press |
 |-------|-------------|------------|
@@ -50,21 +54,41 @@ gpiozero/lgpio needs on some Pi 5 kernels.
 
 ## Encoder (Adafruit 5880 — Seesaw I²C)
 
-| Signal | Connection | Notes | Verification |
-|--------|------------|-------|--------------|
-| VIN | 3.3 V | MineBox power rail | PRODUCT_DATASHEET |
-| GND | GND | | PRODUCT_DATASHEET |
-| SDA | I²C1 SDA (BCM 2) | `i2c_bus = 1` | PRODUCT_DATASHEET |
-| SCL | I²C1 SCL (BCM 3) | | PRODUCT_DATASHEET |
-| INT | BCM **24** | Optional; `interrupt_gpio` in config | UNVERIFIED_AGAINST_PCB (Pi pin choice) |
-| 3Vo | unused | Do not back-power | PRODUCT_DATASHEET |
-| Push switch | Internal Seesaw GPIO 24 | Active-low | PRODUCT_DATASHEET |
-| I²C address | `0x36` default | Jumpers `0x36`–`0x3D` | PRODUCT_DATASHEET |
+Bus: **I²C1** (`/dev/i2c-1`). Address: **0x36**. Enable: `dtparam=i2c_arm=on`.
+
+SDA/SCL are clock on J1-6 / GPIO3 and data on J1-7 / GPIO2. Do **not** assume SDA-then-SCL order on the JST.
+
+| Function | J1 hole | Header pin | BCM GPIO | Notes | Verification |
+|----------|---------|------------|----------|-------|--------------|
+| Encoder SDA | 7 | 3 | **GPIO2** | I2C1 data | SOURCE_VERIFIED |
+| Encoder SCL | 6 | 5 | **GPIO3** | I2C1 clock | SOURCE_VERIFIED |
+| Encoder INT | 8 | 15 | **GPIO22** | Optional, open-drain | SOURCE_VERIFIED |
+| Push switch | — | — | Seesaw GPIO 24 | On-module, active-low | PRODUCT_DATASHEET |
+
+```
+ENC_INT   = 22    # GPIO22, optional
+I2C_BUS   = 1
+ENC_ADDR  = 0x36
+```
 
 There are **no** quadrature `gpio_a` / `gpio_b` BCM pins — rotation is tracked on-module.
 
 HAL: `app/hardware/seesaw_encoder.py` via `RaspberryPi5Hardware`.  
 Details: `docs/v1/Encoder.md`.
+
+---
+
+## Power (not software pins)
+
+Header pins **2** and **6** stay with the screen. Same 5 V and ground rails inside the Pi.
+
+| Rail | J1 | Header pin used | Why |
+|------|----|-----------------|-----|
+| 3.3 V | 1 | 1 | Encoder + pull-ups |
+| 5 V (LEDs only) | 3 | **4** | Pin 2 taken by the screen |
+| GND | 2 | **9** | Pin 6 taken by the screen |
+
+Do not treat 3.3 V / 5 V / GND as GPIOs.
 
 ---
 
@@ -89,11 +113,11 @@ Pi 5 profile may report platform cooling as degraded/auto without claiming PCB G
 
 ## Conflicts
 
-- Historical ROADMAP deferred buttons while app code used BCM23/17 — still provisional.
+- Older software used GPIO23 (left) and GPIO17 (right) with INT on GPIO24. Current mapping is GPIO17 / GPIO27 / INT GPIO22.
 - Rev D replaces temporary two-button *navigation* with the Seesaw encoder; buttons remain as secondary controls.
 
 ---
 
 ## Owner action required
 
-Add electrical pinout (PCB or KiCad export) for INT routing, LEDs, and fan; then flip verification to `SOURCE_VERIFIED` where applicable.
+LED and fan GPIO still need electrical pinout before they can be configured.

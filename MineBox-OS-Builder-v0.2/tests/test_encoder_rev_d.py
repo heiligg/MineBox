@@ -25,11 +25,11 @@ class EncoderRevDTests(unittest.TestCase):
                     "[profile]",
                     'name = "mock"',
                     "[buttons.left]",
-                    "gpio_bcm = 23",
+                    "gpio_bcm = 17",
                     'short_action = "back"',
                     'long_action = "home"',
                     "[buttons.right]",
-                    "gpio_bcm = 17",
+                    "gpio_bcm = 27",
                     'short_action = "context"',
                     'long_action = "power"',
                     "[encoder]",
@@ -38,7 +38,7 @@ class EncoderRevDTests(unittest.TestCase):
                     'status = "OK"',
                     "i2c_bus = 1",
                     "address = 0x36",
-                    "interrupt_gpio = 24",
+                    "interrupt_gpio = 22",
                 ]
             )
             + "\n",
@@ -182,7 +182,7 @@ class EncoderRevDTests(unittest.TestCase):
         self.assertEqual(cfg.encoder_type, "adafruit_seesaw")
         self.assertEqual(cfg.encoder_address, 0x36)
         self.assertEqual(cfg.encoder_i2c_bus, 1)
-        self.assertEqual(cfg.encoder_interrupt_gpio, 24)
+        self.assertEqual(cfg.encoder_interrupt_gpio, 22)
         self.assertEqual(cfg.encoder_debounce_ms, 15)
         self.assertEqual(cfg.encoder_long_press_ms, 700)
         self.assertEqual(cfg.left_button.short_action, "back")

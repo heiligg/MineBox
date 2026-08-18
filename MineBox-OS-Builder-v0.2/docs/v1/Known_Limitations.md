@@ -6,8 +6,8 @@ Updated at Checkpoint 8 completion (`1.0.0-prototype.1`).
 
 ## Hardware
 
-- Button GPIOs BCM23 / BCM17 are **UNVERIFIED_AGAINST_PCB**.
-- Encoder / LEDs / fan GPIO remain **NOT_CONFIGURED** until PCB pinout is confirmed.
+- Button GPIOs are **GPIO17** (left / SW1) and **GPIO27** (right / SW2), active-low.
+- Encoder is I²C1 address `0x36`; optional INT is **GPIO22**. LED / fan GPIO remain **NOT_CONFIGURED**.
 - CM5 profile is a placeholder.
 - Dual-radio hotspot **logical** behavior is implemented; **physical** validation requires Raspberry Pi hardware (not claimed in CP8 packaging).
 

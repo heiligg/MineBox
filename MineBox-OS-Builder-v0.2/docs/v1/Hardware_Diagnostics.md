@@ -21,4 +21,4 @@ API: `GET /api/v1/display/events?diagnostics=1` and `hardware_diag` inside `/api
 
 ## Encoder hardware
 
-Real encoder GPIO remains **NOT_CONFIGURED**. Diagnostics validates the event bridge via mock/keyboard injection until PCB pinout is verified.
+Seesaw over I²C1 address `0x36`. Optional INT is BCM GPIO22. There are no quadrature BCM pins. Diagnostics also validates the event bridge via mock/keyboard injection.

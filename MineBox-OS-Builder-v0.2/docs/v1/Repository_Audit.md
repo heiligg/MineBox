@@ -99,13 +99,13 @@
 
 | Field | Detail |
 |-------|--------|
-| **Status** | PARTIAL (buttons) / NOT IMPLEMENTED (encoder, LEDs, PCB pinout) |
-| **Sources** | `gpio_buttons.py`, `scripts/button_test.py`, `button_monitor.py`, `app/README.md`, `docs/ROADMAP.md` |
+| **Status** | WORKING (buttons + Seesaw I²C encoder) / NOT_CONFIGURED (LEDs, fan GPIO) |
+| **Sources** | `gpio_buttons.py`, `scripts/button_test.py`, `button_monitor.py`, `config/hardware.example.toml`, `docs/v1/Hardware_Pinout.md` |
 | **Works** | Debounced dual buttons via gpiozero; UI injection of curses keys; diagnostic scripts |
-| **GPIO from repo (provisional — not PCB-verified):** | Left **BCM23 / pin 16**; Right **BCM17 / pin 11**; GND **pin 14**; active-low, internal pull-up |
-| **Missing** | Adafruit 5880 encoder pins; LED illumination control; KiCad/PCB files (**none in repository**); CM5 profile |
-| **Conflicts** | `docs/ROADMAP.md` item 4 says button GPIOs wait for hardware; code already hardcodes BCM23/17. No second conflicting product map found. Fan uses Pi 5 `FAN_PWM` / cooling_fan — no pin clash with 17/23 in software |
-| **Action** | **Centralize** pins in config (Phase 3/4); **do not invent** encoder/LED pins; owner must confirm PCB pinout |
+| **GPIO from repo:** | Left **GPIO17 / header pin 11**; Right **GPIO27 / header pin 13**; INT **GPIO22 / header pin 15**; GND **header pin 9**; 5 V LEDs **header pin 4**; active-low with PCB 10 k pull-ups |
+| **Missing** | LED illumination GPIO; KiCad/PCB files (**none in repository**); CM5 profile |
+| **Conflicts** | Older software used GPIO23/17 and INT GPIO24. Current map is GPIO17/27/22. Fan uses Pi 5 `FAN_PWM` / cooling_fan. |
+| **Action** | LED/fan GPIO remain unset until pinout is provided |
 
 ### 2.8 Fan / thermal
 
@@ -265,8 +265,8 @@
 
 See `Implementation_Plan.md` § Owner approvals. Highest urgency:
 
-1. Confirm or replace provisional button GPIOs (BCM23/17) against the custom PCB.  
-2. Provide Adafruit 5880 + LED pinout (or authorize mock-only until PCB lands).  
+1. LED and fan GPIO remain unset until pinout is provided.  
+2. Encoder is I²C1 `0x36` with optional INT GPIO22.  
 3. Accept Prototype default-credential policy (force change on first boot vs ship defaults).  
 4. Choose display UI path: evolve curses vs new 800×480 graphical kiosk.  
 5. Confirm whether hotspot internet sharing remains a v1 requirement (currently implemented).

@@ -52,7 +52,7 @@ Open `http://127.0.0.1:8080/display/dev` (800×480 CSS). Keyboard: arrows/Enter/
 
 | Area | Test |
 |------|------|
-| Buttons | Short/hold left/right on BCM23/17 |
+| Buttons | Short/hold left/right on GPIO17 / GPIO27 |
 | Encoder/LEDs/fan GPIO | Deferred — NOT_CONFIGURED |
 | Display | Chromium kiosk 800×480; focus nav; degraded reconnect |
 | Curses fallback | `minebox-ui` on tty1 still works |
