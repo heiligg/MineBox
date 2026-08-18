@@ -100,6 +100,11 @@ table inet minebox_filter {{
         ip protocol igmp accept
         udp dport 5353 accept
 
+        # SSDP / UPnP IGD: router replies from UDP 1900. Without this the
+        # dashboard port-forward button cannot see the home router.
+        iifname != "{hs}" iifname != "lo" udp sport 1900 accept
+        iifname != "{hs}" iifname != "lo" udp dport 1900 accept
+
         # Hotspot: DHCP, DNS, dashboard, Minecraft, voice chat (and optional SSH)
         iifname "{hs}" udp dport {{ 53, 67, {vc} }} accept
         iifname "{hs}" tcp dport {{ 53, 80, {dash}, {mc} }} accept

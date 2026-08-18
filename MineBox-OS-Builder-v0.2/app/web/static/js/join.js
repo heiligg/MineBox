@@ -274,9 +274,12 @@
         internetValue.textContent =
             data.internet_address || "Unavailable";
 
-        if (data.internet_mapped) {
+        if (data.internet_mapped && data.internet_reachable) {
             statusValue.textContent = "Port forwarded";
             statusValue.className = "join-value ok";
+        } else if (data.internet_mapped && data.upnp && data.upnp.double_nat) {
+            statusValue.textContent = "Router forwarded (double NAT)";
+            statusValue.className = "join-value warn";
         } else if (data.internet_address) {
             statusValue.textContent = "Needs router port forward";
             statusValue.className = "join-value warn";
@@ -346,7 +349,7 @@
             }
             showMessage(
                 data.message || "Internet join enabled.",
-                "success"
+                data.join && data.join.internet_reachable ? "success" : "warning"
             );
         } catch (error) {
             showMessage(

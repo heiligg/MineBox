@@ -112,6 +112,8 @@ class NetworkCp6Tests(unittest.TestCase):
         self.assertIn("udp dport 5353 accept", with_sharing)
         self.assertIn("24454", with_sharing)
         self.assertIn("udp dport 24454 accept", with_sharing)
+        self.assertIn("udp sport 1900 accept", with_sharing)
+        self.assertIn("udp dport 1900 accept", with_sharing)
         self.assertIn("policy drop", with_sharing)
         self.assertIn('iifname "lo" accept', with_sharing)
 

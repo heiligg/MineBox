@@ -28,6 +28,7 @@ rfkill
 iproute2
 avahi-daemon
 libnss-mdns
+miniupnpc
 chromium
 xinit
 x11-xserver-utils

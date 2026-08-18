@@ -16,7 +16,7 @@ Updated at Checkpoint 8 completion (`1.0.0-prototype.1`).
 - Hotspot works **without internet**; internet sharing is optional.
 - SoftAP templates may seed `wlan0` at image bake; first boot / render helper rewrites from interface roles.
 - Tailscale is optional, **disabled by default**, and not required for local play.
-- No public port-forward / UPnP automation.
+- Dashboard **Enable internet join** uses UPnP (SSDP `udp/1900`). Double-NAT (mesh behind an ISP router) still needs a forward on the outer modem.
 - Captive helper answers local probes only — not full internet captive-portal emulation.
 
 ## Display UI

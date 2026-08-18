@@ -16,6 +16,10 @@ table inet minebox_filter {
         ip protocol igmp accept
         udp dport 5353 accept
 
+        # SSDP / UPnP IGD discovery (dashboard port-forward button)
+        iifname != "wlan0" iifname != "lo" udp sport 1900 accept
+        iifname != "wlan0" iifname != "lo" udp dport 1900 accept
+
         # Hotspot clients: DHCP, DNS, captive/dashboard, Minecraft, SSH (bring-up)
         iifname "wlan0" udp dport { 53, 67, 24454 } accept
         iifname "wlan0" tcp dport { 53, 80, 8080, 25565, 22 } accept
