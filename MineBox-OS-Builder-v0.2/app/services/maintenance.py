@@ -41,5 +41,21 @@ def run_once(now: float | None = None) -> list[str]:
             result = minecraft.restart()
             messages.append(result.message)
             if result.ok: state['last_restart_date'] = today
+    last_dns = float(state.get("last_public_dns", 0) or 0)
+    if now - last_dns >= 300:
+        try:
+            from services import public_dns
+
+            dns = public_dns.refresh()
+            state["last_public_dns"] = now
+            if (
+                dns.get("configured")
+                and not dns.get("skipped")
+                and dns.get("message")
+            ):
+                messages.append(str(dns["message"]))
+        except Exception as exc:  # noqa: BLE001
+            state["last_public_dns"] = now
+            messages.append(f"Public DNS refresh skipped: {exc}")
     _save_state(state)
     return messages

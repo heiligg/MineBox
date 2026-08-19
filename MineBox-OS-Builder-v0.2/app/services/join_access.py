@@ -456,10 +456,21 @@ def status() -> dict[str, Any]:
 
     lan_address = _format_address(host, port)
     lan_ip_address = _format_address(ip_address, port) if ip_address else None
+    dns: dict[str, Any] = {}
+    try:
+        from services import public_dns
+
+        dns = public_dns.status()
+    except Exception:
+        dns = {}
+    dns_host = str(dns.get("hostname") or "").strip() or None
+    if not dns.get("configured"):
+        dns_host = None
+
     join_host = igd_ip if (mapped and igd_ip and not _private_ip(igd_ip)) else wan_ip
     internet_address = (
-        _format_address(join_host, mapping.get("external_port") or port)
-        if join_host
+        _format_address(dns_host or join_host, mapping.get("external_port") or port)
+        if (dns_host or join_host)
         else None
     )
 
@@ -477,7 +488,7 @@ def status() -> dict[str, Any]:
             + (f", then share {internet_address}." if internet_address else ".")
         )
 
-    return {
+    payload = {
         "ok": True,
         "hostname": _hostname(),
         "local_hostname": host,
@@ -487,6 +498,7 @@ def status() -> dict[str, Any]:
         "lan_ip_address": lan_ip_address,
         "public_ip": wan_ip,
         "internet_address": internet_address,
+        "public_dns": dns,
         "internet_mapped": mapped,
         "internet_reachable": reachable,
         "upnp": mapping,
@@ -499,3 +511,9 @@ def status() -> dict[str, Any]:
             internet_note,
         ],
     }
+    if dns_host:
+        payload["notes"].append(
+            f"Public MineBox name: {dns_host}. Internet friends type that "
+            "instead of a raw IP. Port forwarding is still required."
+        )
+    return payload

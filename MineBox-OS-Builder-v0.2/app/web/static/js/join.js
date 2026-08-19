@@ -13,6 +13,10 @@
     let enableButton;
     let disableButton;
     let refreshButton;
+    let dnsSlugInput;
+    let dnsTokenInput;
+    let dnsClaimButton;
+    let dnsClearButton;
     let busy = false;
 
     function injectStyles() {
@@ -86,6 +90,26 @@
                 opacity: 0.5;
                 cursor: not-allowed;
             }
+            .join-forward {
+                margin-top: 20px;
+                padding: 16px;
+                border: 1px solid rgba(255,255,255,0.12);
+                border-radius: 14px;
+                background: rgba(255,255,255,0.03);
+            }
+            .join-forward-title {
+                font-size: 13px;
+                font-weight: 800;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+                margin-bottom: 6px;
+            }
+            .join-forward-help {
+                color: var(--muted);
+                font-size: 13px;
+                line-height: 1.45;
+                margin-bottom: 12px;
+            }
             .join-message {
                 display: none;
                 margin-top: 14px;
@@ -105,6 +129,51 @@
             .join-message.error {
                 background: rgba(220, 80, 80, 0.12);
                 color: #ff9c9c;
+            }
+            .join-dns {
+                margin-top: 18px;
+                padding-top: 16px;
+                border-top: 1px solid rgba(255,255,255,0.08);
+            }
+            .join-dns-title {
+                font-size: 13px;
+                font-weight: 800;
+                letter-spacing: 0.04em;
+                text-transform: uppercase;
+                margin-bottom: 6px;
+            }
+            .join-dns-help {
+                color: var(--muted);
+                font-size: 13px;
+                line-height: 1.45;
+                margin-bottom: 12px;
+            }
+            .join-dns-help a { color: #9ec1ff; }
+            .join-dns-row {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: center;
+                gap: 8px;
+                margin-bottom: 10px;
+            }
+            .join-dns-prefix {
+                font-weight: 800;
+                font-size: 16px;
+            }
+            .join-dns-input {
+                min-width: 140px;
+                flex: 1;
+                border: 1px solid rgba(255,255,255,0.12);
+                border-radius: 10px;
+                background: rgba(255,255,255,0.04);
+                color: var(--text);
+                font: inherit;
+                font-weight: 700;
+                padding: 10px 12px;
+            }
+            .join-dns-suffix {
+                color: var(--muted);
+                font-weight: 700;
             }
         `;
         document.head.appendChild(style);
@@ -134,9 +203,45 @@
         }
     }
 
+    function bindExisting() {
+        panel = document.getElementById("join");
+        if (!panel) {
+            return false;
+        }
+
+        note = document.getElementById("join-refresh-note") || note;
+        lanValue = document.getElementById("join-lan-value");
+        lanIpValue = document.getElementById("join-lan-ip-value");
+        internetValue = document.getElementById("join-internet-value");
+        statusValue = document.getElementById("join-status-value");
+        message = document.getElementById("join-message");
+        refreshButton = document.getElementById("join-refresh-button");
+        enableButton = document.getElementById("join-enable-button");
+        disableButton = document.getElementById("join-disable-button");
+        dnsSlugInput = document.getElementById("join-dns-slug");
+        dnsTokenInput = document.getElementById("join-dns-token");
+        dnsClaimButton = document.getElementById("join-dns-claim");
+        dnsClearButton = document.getElementById("join-dns-clear");
+
+        if (!lanValue || !refreshButton || !dnsClaimButton) {
+            return false;
+        }
+
+        if (panel.dataset.joinBound === "1") {
+            return true;
+        }
+
+        refreshButton.addEventListener("click", () => loadStatus(true));
+        enableButton.addEventListener("click", enableInternet);
+        disableButton.addEventListener("click", disableInternet);
+        dnsClaimButton.addEventListener("click", claimDns);
+        dnsClearButton.addEventListener("click", clearDns);
+        panel.dataset.joinBound = "1";
+        return true;
+    }
+
     function injectPanel() {
-        if (document.getElementById("join")) {
-            panel = document.getElementById("join");
+        if (bindExisting()) {
             return true;
         }
 
@@ -150,79 +255,69 @@
         panel = document.createElement("article");
         panel.id = "join";
         panel.className = "panel section join-panel";
-
-        const header = document.createElement("div");
-        header.className = "section-header";
-
-        const copy = document.createElement("div");
-        const title = document.createElement("h2");
-        title.className = "section-title";
-        title.textContent = "How to join";
-
-        note = document.createElement("span");
-        note.className = "section-note";
-        note.textContent = "Loading join addresses…";
-
-        copy.append(title, note);
-        header.appendChild(copy);
-
-        const grid = document.createElement("div");
-        grid.className = "join-grid";
-
-        function row(label, id) {
-            const wrap = document.createElement("div");
-            wrap.className = "join-row";
-            const left = document.createElement("span");
-            left.className = "join-label";
-            left.textContent = label;
-            const value = document.createElement("strong");
-            value.className = "join-value";
-            value.id = id;
-            value.textContent = "…";
-            wrap.append(left, value);
-            grid.appendChild(wrap);
-            return value;
-        }
-
-        lanValue = row("Home network (best)", "join-lan-value");
-        lanIpValue = row("Home network IP", "join-lan-ip-value");
-        internetValue = row("Internet address", "join-internet-value");
-        statusValue = row("Internet access", "join-status-value");
-
-        const notes = document.createElement("div");
-        notes.className = "join-notes";
-        notes.id = "join-notes";
-
-        const actions = document.createElement("div");
-        actions.className = "join-actions";
-
-        refreshButton = document.createElement("button");
-        refreshButton.type = "button";
-        refreshButton.className = "join-button";
-        refreshButton.textContent = "Refresh";
-        refreshButton.addEventListener("click", () => loadStatus(true));
-
-        enableButton = document.createElement("button");
-        enableButton.type = "button";
-        enableButton.className = "join-button primary";
-        enableButton.textContent = "Enable internet join";
-        enableButton.addEventListener("click", enableInternet);
-
-        disableButton = document.createElement("button");
-        disableButton.type = "button";
-        disableButton.className = "join-button";
-        disableButton.textContent = "Disable internet join";
-        disableButton.addEventListener("click", disableInternet);
-
-        actions.append(refreshButton, enableButton, disableButton);
-
-        message = document.createElement("div");
-        message.className = "join-message";
-        message.id = "join-message";
-
-        panel.append(header, grid, notes, actions, message);
+        panel.innerHTML = `
+            <div class="section-header">
+                <div>
+                    <h2 class="section-title">How to join</h2>
+                    <span class="section-note" id="join-refresh-note">Loading join addresses…</span>
+                </div>
+            </div>
+            <div class="join-grid">
+                <div class="join-row">
+                    <span class="join-label">Home network (best)</span>
+                    <strong class="join-value" id="join-lan-value">…</strong>
+                </div>
+                <div class="join-row">
+                    <span class="join-label">Home network IP</span>
+                    <strong class="join-value" id="join-lan-ip-value">…</strong>
+                </div>
+            </div>
+            <div class="join-notes" id="join-notes"></div>
+            <div class="join-forward" id="join-forward">
+                <div class="join-forward-title">Port forwarding</div>
+                <div class="join-forward-help">
+                    Opens Minecraft to the internet, then lets you pick a public
+                    <strong>minebox-</strong> name for friends to type.
+                </div>
+                <div class="join-grid">
+                    <div class="join-row">
+                        <span class="join-label">Internet address</span>
+                        <strong class="join-value" id="join-internet-value">…</strong>
+                    </div>
+                    <div class="join-row">
+                        <span class="join-label">Port forward</span>
+                        <strong class="join-value" id="join-status-value">…</strong>
+                    </div>
+                </div>
+                <div class="join-actions">
+                    <button type="button" class="join-button" id="join-refresh-button">Refresh</button>
+                    <button type="button" class="join-button primary" id="join-enable-button">Enable port forwarding</button>
+                    <button type="button" class="join-button" id="join-disable-button">Disable port forwarding</button>
+                </div>
+                <div class="join-dns">
+                    <div class="join-dns-title">Public name</div>
+                    <div class="join-dns-help">
+                        Always starts with <strong>minebox-</strong>. Type the rest and claim it here.
+                        If that name is taken, pick another word.
+                    </div>
+                    <div class="join-dns-row">
+                        <span class="join-dns-prefix">minebox-</span>
+                        <input type="text" class="join-dns-input" id="join-dns-slug" placeholder="yourword" autocomplete="off" spellcheck="false">
+                        <span class="join-dns-suffix">.duckdns.org</span>
+                    </div>
+                    <div class="join-dns-row">
+                        <input type="password" class="join-dns-input" id="join-dns-token" placeholder="DuckDNS token (saved on this MineBox)" autocomplete="off">
+                    </div>
+                    <div class="join-actions">
+                        <button type="button" class="join-button primary" id="join-dns-claim">Claim name</button>
+                        <button type="button" class="join-button" id="join-dns-clear">Clear name</button>
+                    </div>
+                </div>
+                <div class="join-message" id="join-message"></div>
+            </div>
+        `;
         target.parentNode.insertBefore(panel, target.nextSibling);
-        return true;
+        return bindExisting();
     }
 
     function showMessage(text, type) {
@@ -234,9 +329,11 @@
 
     function setBusy(state) {
         busy = state;
-        refreshButton.disabled = state;
-        enableButton.disabled = state;
-        disableButton.disabled = state;
+        [refreshButton, enableButton, disableButton, dnsClaimButton, dnsClearButton]
+            .filter(Boolean)
+            .forEach((button) => {
+                button.disabled = state;
+            });
     }
 
     async function parseResponse(response) {
@@ -274,6 +371,14 @@
         internetValue.textContent =
             data.internet_address || "Unavailable";
 
+        const dns = data.public_dns || {};
+        if (dnsSlugInput && !dnsSlugInput.matches(":focus")) {
+            dnsSlugInput.value = dns.slug || dnsSlugInput.value || "";
+        }
+        if (dnsTokenInput && dns.token_set) {
+            dnsTokenInput.placeholder = "Token saved — paste a new one only to change it";
+        }
+
         if (data.internet_mapped && data.internet_reachable) {
             statusValue.textContent = "Port forwarded";
             statusValue.className = "join-value ok";
@@ -289,18 +394,22 @@
         }
 
         const notes = document.getElementById("join-notes");
-        notes.replaceChildren();
-        for (const line of data.notes || []) {
-            const p = document.createElement("div");
-            p.textContent = line;
-            notes.appendChild(p);
+        if (notes) {
+            notes.replaceChildren();
+            for (const line of data.notes || []) {
+                const p = document.createElement("div");
+                p.textContent = line;
+                notes.appendChild(p);
+            }
         }
 
-        note.textContent =
-            `Updated · ${new Date().toLocaleTimeString([], {
-                hour: "numeric",
-                minute: "2-digit"
-            })}`;
+        if (note) {
+            note.textContent =
+                `Updated · ${new Date().toLocaleTimeString([], {
+                    hour: "numeric",
+                    minute: "2-digit"
+                })}`;
+        }
     }
 
     async function loadStatus(announce) {
@@ -348,13 +457,13 @@
                 render(data.join);
             }
             showMessage(
-                data.message || "Internet join enabled.",
+                data.message || "Port forwarding enabled.",
                 data.join && data.join.internet_reachable ? "success" : "warning"
             );
         } catch (error) {
             showMessage(
                 error.message ||
-                "Could not enable automatic internet join.",
+                "Could not enable automatic port forwarding.",
                 "error"
             );
         } finally {
@@ -377,12 +486,77 @@
                 render(data.join);
             }
             showMessage(
-                data.message || "Internet join disabled.",
+                data.message || "Port forwarding disabled.",
                 "success"
             );
         } catch (error) {
             showMessage(
-                error.message || "Could not disable internet join.",
+                error.message || "Could not disable port forwarding.",
+                "error"
+            );
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function claimDns() {
+        if (busy) {
+            return;
+        }
+
+        setBusy(true);
+        showMessage("Checking if that MineBox name is free…", "warning");
+        try {
+            const response = await fetch(`${API_BASE}/dns/claim`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    slug: (dnsSlugInput && dnsSlugInput.value) || "",
+                    token: (dnsTokenInput && dnsTokenInput.value) || ""
+                })
+            });
+            const data = await parseResponse(response);
+            if (data.join) {
+                render(data.join);
+            }
+            if (dnsTokenInput) {
+                dnsTokenInput.value = "";
+            }
+            showMessage(
+                data.message || "Public MineBox name claimed.",
+                "success"
+            );
+        } catch (error) {
+            showMessage(
+                error.message || "Could not claim that public name.",
+                "error"
+            );
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function clearDns() {
+        if (busy) {
+            return;
+        }
+
+        setBusy(true);
+        try {
+            const response = await fetch(`${API_BASE}/dns/clear`, {
+                method: "POST"
+            });
+            const data = await parseResponse(response);
+            if (data.join) {
+                render(data.join);
+            }
+            if (dnsSlugInput) {
+                dnsSlugInput.value = "";
+            }
+            showMessage(data.message || "Public name cleared.", "success");
+        } catch (error) {
+            showMessage(
+                error.message || "Could not clear the public name.",
                 "error"
             );
         } finally {

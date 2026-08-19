@@ -838,8 +838,178 @@
 
         /* MineBox Backup UI v1 */
 
-        .backup-panel {
+        .backup-panel,
+        .join-panel {
             grid-column: 1 / -1;
+        }
+
+        .join-grid {
+            display: grid;
+            gap: 12px;
+            margin-top: 4px;
+        }
+
+        .join-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding: 12px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+        }
+
+        .join-row:last-child { border-bottom: 0; }
+
+        .join-label {
+            color: var(--muted);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .join-value {
+            color: var(--text);
+            font-size: 16px;
+            font-weight: 800;
+            text-align: right;
+            word-break: break-all;
+        }
+
+        .join-value.ok { color: #8ee895; }
+        .join-value.warn { color: #ffd27a; }
+
+        .join-notes {
+            display: grid;
+            gap: 8px;
+            margin-top: 16px;
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.45;
+        }
+
+        .join-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 16px;
+        }
+
+        .join-button {
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 10px;
+            background: rgba(255,255,255,0.04);
+            color: var(--text);
+            cursor: pointer;
+            font: inherit;
+            font-weight: 700;
+            padding: 10px 14px;
+        }
+
+        .join-button.primary {
+            background: #2f6fed;
+            border-color: #2f6fed;
+        }
+
+        .join-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .join-forward {
+            margin-top: 20px;
+            padding: 16px;
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 14px;
+            background: rgba(255,255,255,0.03);
+        }
+
+        .join-forward-title {
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+
+        .join-forward-help,
+        .join-dns-help {
+            color: var(--muted);
+            font-size: 13px;
+            line-height: 1.45;
+            margin-bottom: 12px;
+        }
+
+        .join-dns-help a,
+        .join-forward-help a { color: #9ec1ff; }
+
+        .join-dns {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid rgba(255,255,255,0.08);
+        }
+
+        .join-dns-title {
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            margin-bottom: 6px;
+        }
+
+        .join-dns-row {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+
+        .join-dns-prefix {
+            font-weight: 800;
+            font-size: 16px;
+        }
+
+        .join-dns-input {
+            min-width: 140px;
+            flex: 1;
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 10px;
+            background: rgba(255,255,255,0.04);
+            color: var(--text);
+            font: inherit;
+            font-weight: 700;
+            padding: 10px 12px;
+        }
+
+        .join-dns-suffix {
+            color: var(--muted);
+            font-weight: 700;
+        }
+
+        .join-message {
+            display: none;
+            margin-top: 14px;
+            padding: 12px 14px;
+            border-radius: 10px;
+            font-size: 14px;
+        }
+
+        .join-message.visible { display: block; }
+
+        .join-message.success {
+            background: rgba(80, 180, 100, 0.15);
+            color: #8ee895;
+        }
+
+        .join-message.warning {
+            background: rgba(255, 180, 60, 0.12);
+            color: #ffd27a;
+        }
+
+        .join-message.error {
+            background: rgba(220, 80, 80, 0.12);
+            color: #ff9c9c;
         }
 
         .backup-header-actions {
@@ -1474,6 +1644,11 @@
                     <span class="nav-text">Updates</span>
                 </a>
 
+                <a class="nav-item" href="#join" id="join-nav-item">
+                    <span class="nav-icon">+</span>
+                    <span class="nav-text">How to join</span>
+                </a>
+
                 <a class="nav-item" href="/setup">
                     <span class="nav-icon">⚙</span>
                     <span class="nav-text">Setup</span>
@@ -1868,6 +2043,100 @@
                     <div class="summary-row">
                         <span>Managed service</span>
                         <strong>minecraft.service</strong>
+                    </div>
+                </article>
+
+
+                <article class="panel section join-panel" id="join">
+                    <div class="section-header">
+                        <div>
+                            <h2 class="section-title">How to join</h2>
+                            <span class="section-note" id="join-refresh-note">
+                                Loading join addresses…
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="join-grid">
+                        <div class="join-row">
+                            <span class="join-label">Home network (best)</span>
+                            <strong class="join-value" id="join-lan-value">…</strong>
+                        </div>
+                        <div class="join-row">
+                            <span class="join-label">Home network IP</span>
+                            <strong class="join-value" id="join-lan-ip-value">…</strong>
+                        </div>
+                    </div>
+
+                    <div class="join-notes" id="join-notes"></div>
+
+                    <div class="join-forward" id="join-forward">
+                        <div class="join-forward-title">Port forwarding</div>
+                        <div class="join-forward-help">
+                            Opens Minecraft to the internet, then lets you pick a public
+                            <strong>minebox-</strong> name for friends to type.
+                        </div>
+                        <div class="join-grid">
+                            <div class="join-row">
+                                <span class="join-label">Internet address</span>
+                                <strong class="join-value" id="join-internet-value">…</strong>
+                            </div>
+                            <div class="join-row">
+                                <span class="join-label">Port forward</span>
+                                <strong class="join-value" id="join-status-value">…</strong>
+                            </div>
+                        </div>
+                        <div class="join-actions">
+                            <button type="button" class="join-button" id="join-refresh-button">
+                                Refresh
+                            </button>
+                            <button type="button" class="join-button primary" id="join-enable-button">
+                                Enable port forwarding
+                            </button>
+                            <button type="button" class="join-button" id="join-disable-button">
+                                Disable port forwarding
+                            </button>
+                        </div>
+                        <div class="join-dns">
+                            <div class="join-dns-title">Public name</div>
+                            <div class="join-dns-help">
+                                Always starts with <strong>minebox-</strong>. Type the rest
+                                and claim it here. If that name is taken, pick another word.
+                                One-time token from
+                                <a href="https://www.duckdns.org" target="_blank" rel="noopener">duckdns.org</a>
+                                — add <strong>minebox-yourword</strong> if it is still free.
+                            </div>
+                            <div class="join-dns-row">
+                                <span class="join-dns-prefix">minebox-</span>
+                                <input
+                                    type="text"
+                                    class="join-dns-input"
+                                    id="join-dns-slug"
+                                    placeholder="yourword"
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                >
+                                <span class="join-dns-suffix">.duckdns.org</span>
+                            </div>
+                            <div class="join-dns-row">
+                                <input
+                                    type="password"
+                                    class="join-dns-input"
+                                    id="join-dns-token"
+                                    placeholder="DuckDNS token (saved on this MineBox)"
+                                    autocomplete="off"
+                                >
+                            </div>
+                            <div class="join-actions">
+                                <button type="button" class="join-button primary" id="join-dns-claim">
+                                    Claim name
+                                </button>
+                                <button type="button" class="join-button" id="join-dns-clear">
+                                    Clear name
+                                </button>
+                            </div>
+                        </div>
+                        <div class="join-message" id="join-message"></div>
                     </div>
                 </article>
 
@@ -3985,7 +4254,7 @@
 <script src="/static/js/csrf.js"></script>
 <script src="/static/js/settings.js?v=online-mode-uuid"></script>
 <script src="/static/js/network.js"></script>
-<script src="/static/js/join.js?v=upnp-ssdp"></script>
+<script src="/static/js/join.js?v=public-dns-forward"></script>
 <script src="/static/js/files.js?v=upload-world-save"></script>
 <script src="/static/js/players.js"></script>
 <script src="/static/js/mods.js"></script>
