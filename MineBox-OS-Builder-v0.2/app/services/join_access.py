@@ -466,15 +466,33 @@ def status() -> dict[str, Any]:
     dns_host = str(dns.get("hostname") or "").strip() or None
     if not dns.get("configured"):
         dns_host = None
+    tunnel: dict[str, Any] = {}
+    try:
+        from services import playit
+
+        tunnel = playit.status()
+    except Exception:
+        tunnel = {}
+    tunnel_address = str(tunnel.get("address") or "").strip() or None
+    if not tunnel.get("running"):
+        tunnel_address = None
 
     join_host = igd_ip if (mapped and igd_ip and not _private_ip(igd_ip)) else wan_ip
     internet_address = (
-        _format_address(dns_host or join_host, mapping.get("external_port") or port)
-        if (dns_host or join_host)
-        else None
+        tunnel_address
+        or (
+            _format_address(dns_host or join_host, mapping.get("external_port") or port)
+            if (dns_host or join_host)
+            else None
+        )
     )
 
-    if mapped and reachable and internet_address:
+    if tunnel_address:
+        internet_note = (
+            f"Friends on the internet can join {tunnel_address} "
+            "(playit.gg, no router settings)."
+        )
+    elif mapped and reachable and internet_address:
         internet_note = f"Friends on the internet can join {internet_address}."
     elif mapped and mapping.get("double_nat"):
         internet_note = mapping.get("message") or (
@@ -499,6 +517,7 @@ def status() -> dict[str, Any]:
         "public_ip": wan_ip,
         "internet_address": internet_address,
         "public_dns": dns,
+        "playit": tunnel,
         "internet_mapped": mapped,
         "internet_reachable": reachable,
         "upnp": mapping,
@@ -511,6 +530,10 @@ def status() -> dict[str, Any]:
             internet_note,
         ],
     }
+    if tunnel.get("claim_url"):
+        payload["notes"].append(
+            f"Open this claim link once to finish playit.gg setup: {tunnel['claim_url']}"
+        )
     if dns_host:
         payload["notes"].append(
             f"Public MineBox name: {dns_host}. Internet friends type that "

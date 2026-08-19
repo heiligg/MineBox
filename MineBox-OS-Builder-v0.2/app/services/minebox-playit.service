@@ -1,0 +1,18 @@
+[Unit]
+Description=MineBox playit.gg internet tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=minebox
+Group=minebox
+WorkingDirectory=/var/lib/minebox/playit
+ExecStart=/var/lib/minebox/playit/playit
+Restart=always
+RestartSec=5
+StandardOutput=append:/var/lib/minebox/playit/playit.log
+StandardError=append:/var/lib/minebox/playit/playit.log
+
+[Install]
+WantedBy=multi-user.target

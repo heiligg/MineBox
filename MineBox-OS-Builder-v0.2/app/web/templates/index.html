@@ -2073,8 +2073,8 @@
                     <div class="join-forward" id="join-forward">
                         <div class="join-forward-title">Port forwarding</div>
                         <div class="join-forward-help">
-                            Opens Minecraft to the internet, then lets you pick a public
-                            <strong>minebox-</strong> name for friends to type.
+                            Opens Minecraft to the internet. Use playit.gg when
+                            the router will not port-forward.
                         </div>
                         <div class="join-grid">
                             <div class="join-row">
@@ -2090,12 +2090,22 @@
                             <button type="button" class="join-button" id="join-refresh-button">
                                 Refresh
                             </button>
-                            <button type="button" class="join-button primary" id="join-enable-button">
+                            <button type="button" class="join-button primary" id="join-playit-enable">
+                                Easy internet join (playit.gg)
+                            </button>
+                            <button type="button" class="join-button" id="join-playit-disable">
+                                Stop playit.gg
+                            </button>
+                            <button type="button" class="join-button" id="join-enable-button">
                                 Enable port forwarding
                             </button>
                             <button type="button" class="join-button" id="join-disable-button">
                                 Disable port forwarding
                             </button>
+                        </div>
+                        <div class="join-dns-help" id="join-playit-help">
+                            playit.gg is the easy path: no router settings. After you click
+                            the button, open the claim link once if it appears.
                         </div>
                         <div class="join-dns">
                             <div class="join-dns-title">Public name</div>
@@ -4254,7 +4264,7 @@
 <script src="/static/js/csrf.js"></script>
 <script src="/static/js/settings.js?v=online-mode-uuid"></script>
 <script src="/static/js/network.js"></script>
-<script src="/static/js/join.js?v=public-dns-forward"></script>
+<script src="/static/js/join.js?v=playit-gg"></script>
 <script src="/static/js/files.js?v=upload-world-save"></script>
 <script src="/static/js/players.js"></script>
 <script src="/static/js/mods.js"></script>

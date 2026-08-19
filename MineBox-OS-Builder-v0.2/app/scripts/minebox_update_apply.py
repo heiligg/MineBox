@@ -641,6 +641,7 @@ def install_systemd_units(target: Path, dev: bool) -> None:
         "minebox-maintenance.service",
         "minebox-maintenance.timer",
         "minebox-captive.service",
+        "minebox-playit.service",
     ]
     for name in units:
         source = target / "services" / name

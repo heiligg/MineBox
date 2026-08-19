@@ -17,6 +17,9 @@
     let dnsTokenInput;
     let dnsClaimButton;
     let dnsClearButton;
+    let playitEnableButton;
+    let playitDisableButton;
+    let playitHelp;
     let busy = false;
 
     function injectStyles() {
@@ -222,8 +225,11 @@
         dnsTokenInput = document.getElementById("join-dns-token");
         dnsClaimButton = document.getElementById("join-dns-claim");
         dnsClearButton = document.getElementById("join-dns-clear");
+        playitEnableButton = document.getElementById("join-playit-enable");
+        playitDisableButton = document.getElementById("join-playit-disable");
+        playitHelp = document.getElementById("join-playit-help");
 
-        if (!lanValue || !refreshButton || !dnsClaimButton) {
+        if (!lanValue || !refreshButton || !dnsClaimButton || !playitEnableButton) {
             return false;
         }
 
@@ -236,6 +242,8 @@
         disableButton.addEventListener("click", disableInternet);
         dnsClaimButton.addEventListener("click", claimDns);
         dnsClearButton.addEventListener("click", clearDns);
+        playitEnableButton.addEventListener("click", enablePlayit);
+        playitDisableButton.addEventListener("click", disablePlayit);
         panel.dataset.joinBound = "1";
         return true;
     }
@@ -291,8 +299,13 @@
                 </div>
                 <div class="join-actions">
                     <button type="button" class="join-button" id="join-refresh-button">Refresh</button>
-                    <button type="button" class="join-button primary" id="join-enable-button">Enable port forwarding</button>
+                    <button type="button" class="join-button primary" id="join-playit-enable">Easy internet join (playit.gg)</button>
+                    <button type="button" class="join-button" id="join-playit-disable">Stop playit.gg</button>
+                    <button type="button" class="join-button" id="join-enable-button">Enable port forwarding</button>
                     <button type="button" class="join-button" id="join-disable-button">Disable port forwarding</button>
+                </div>
+                <div class="join-dns-help" id="join-playit-help">
+                    playit.gg is the easy path: no router settings. After you click the button, open the claim link once if it appears.
                 </div>
                 <div class="join-dns">
                     <div class="join-dns-title">Public name</div>
@@ -329,7 +342,7 @@
 
     function setBusy(state) {
         busy = state;
-        [refreshButton, enableButton, disableButton, dnsClaimButton, dnsClearButton]
+        [refreshButton, enableButton, disableButton, dnsClaimButton, dnsClearButton, playitEnableButton, playitDisableButton]
             .filter(Boolean)
             .forEach((button) => {
                 button.disabled = state;
@@ -379,7 +392,16 @@
             dnsTokenInput.placeholder = "Token saved — paste a new one only to change it";
         }
 
-        if (data.internet_mapped && data.internet_reachable) {
+        if (data.playit && data.playit.address) {
+            statusValue.textContent = "playit.gg connected";
+            statusValue.className = "join-value ok";
+        } else if (data.playit && data.playit.claim_url) {
+            statusValue.textContent = "playit.gg needs claim link";
+            statusValue.className = "join-value warn";
+        } else if (data.playit && data.playit.running) {
+            statusValue.textContent = "playit.gg starting";
+            statusValue.className = "join-value warn";
+        } else if (data.internet_mapped && data.internet_reachable) {
             statusValue.textContent = "Port forwarded";
             statusValue.className = "join-value ok";
         } else if (data.internet_mapped && data.upnp && data.upnp.double_nat) {
@@ -400,6 +422,24 @@
                 const p = document.createElement("div");
                 p.textContent = line;
                 notes.appendChild(p);
+            }
+        }
+
+        if (playitHelp) {
+            const playit = data.playit || {};
+            if (playit.claim_url) {
+                playitHelp.innerHTML =
+                    'Open this claim link once: <a href="' +
+                    playit.claim_url +
+                    '" target="_blank" rel="noopener">' +
+                    playit.claim_url +
+                    "</a>";
+            } else if (playit.address) {
+                playitHelp.textContent =
+                    "playit.gg is live. Friends join with " + playit.address + ".";
+            } else {
+                playitHelp.textContent =
+                    "playit.gg is the easy path: no router settings. After you click the button, open the claim link once if it appears.";
             }
         }
 
@@ -557,6 +597,61 @@
         } catch (error) {
             showMessage(
                 error.message || "Could not clear the public name.",
+                "error"
+            );
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function enablePlayit() {
+        if (busy) {
+            return;
+        }
+
+        setBusy(true);
+        showMessage("Starting playit.gg… this can take a minute the first time.", "warning");
+        try {
+            const response = await fetch(`${API_BASE}/playit/enable`, {
+                method: "POST"
+            });
+            const data = await parseResponse(response);
+            if (data.join) {
+                render(data.join);
+            }
+            const playit = (data.join && data.join.playit) || {};
+            showMessage(
+                data.message || playit.message || "playit.gg started.",
+                playit.address ? "success" : "warning"
+            );
+        } catch (error) {
+            showMessage(
+                error.message || "Could not start playit.gg.",
+                "error"
+            );
+        } finally {
+            setBusy(false);
+        }
+    }
+
+    async function disablePlayit() {
+        if (busy) {
+            return;
+        }
+
+        setBusy(true);
+        try {
+            const response = await fetch(`${API_BASE}/playit/disable`, {
+                method: "POST"
+            });
+            const data = await parseResponse(response);
+            if (data.join) {
+                render(data.join);
+            }
+            showMessage(data.message || "playit.gg stopped.", "success");
+        } catch (error) {
+            showMessage(
+                error.message || "Could not stop playit.gg.",
                 "error"
             );
         } finally {
